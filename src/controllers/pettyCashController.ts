@@ -48,13 +48,14 @@ export const getPettyCash = async (req: AuthRequest, res: Response) => {
 
 export const createPettyCash = async (req: AuthRequest, res: Response) => {
   try {
-    const { outletId, amount, category, description, receiptImageUrl } = req.body;
+    const { outletId, amount, category, description, receiptImageUrl, maxLimit } = req.body;
 
     const numAmount = parseFloat(amount);
-    if (numAmount > 150000) {
+    const limit = maxLimit ? parseFloat(maxLimit) : 5000000;
+    if (numAmount > limit) {
       return res.status(400).json({
         success: false,
-        message: 'Pengeluaran kas kecil darurat laci kasir maksimal Rp 150.000 per nota!',
+        message: `Pengeluaran kas kecil darurat laci kasir maksimal Rp ${limit.toLocaleString('id-ID')} per nota!`,
       });
     }
 
@@ -166,10 +167,11 @@ export const updatePettyCash = async (req: AuthRequest, res: Response) => {
     }
 
     const newAmount = amount !== undefined ? parseFloat(amount) : Number(existing.amount);
-    if (newAmount > 150000) {
+    const limit = req.body.maxLimit ? parseFloat(req.body.maxLimit) : 5000000;
+    if (newAmount > limit) {
       return res.status(400).json({
         success: false,
-        message: 'Pengeluaran kas kecil darurat laci kasir maksimal Rp 150.000 per nota!',
+        message: `Pengeluaran kas kecil darurat laci kasir maksimal Rp ${limit.toLocaleString('id-ID')} per nota!`,
       });
     }
 
