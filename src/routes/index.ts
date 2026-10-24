@@ -83,6 +83,7 @@ apiRouter.delete(
 // 8. Tagihan Suplai Pabrik (Factory Invoices)
 apiRouter.get('/factory-invoices', authenticateJwt, invoiceController.getInvoices);
 apiRouter.post('/factory-invoices', authenticateJwt, requireRole(['OWNER']), invoiceController.createInvoice);
+apiRouter.put('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.updateInvoice);
 apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['OWNER']), invoiceController.payInvoice);
 apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.deleteInvoice);
 

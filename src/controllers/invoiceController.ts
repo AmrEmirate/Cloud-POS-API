@@ -126,6 +126,91 @@ export const payInvoice = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const updateInvoice = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { supplierName, outletId, issueDate, dueDate, totalAmount, bankAccount, items, status } = req.body;
+
+    const existing = await prisma.factoryInvoice.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Faktur tagihan pabrik tidak ditemukan' });
+    }
+
+    let targetOutletId = outletId || existing.outletId;
+    if (targetOutletId === 'all') {
+      const firstOutlet = await prisma.outlet.findFirst();
+      targetOutletId = firstOutlet ? firstOutlet.id : existing.outletId;
+    }
+
+    // Recreate items if provided
+    if (Array.isArray(items) && items.length > 0) {
+      await prisma.factoryInvoiceItem.deleteMany({ where: { invoiceId: id } });
+    }
+
+    const updated = await prisma.factoryInvoice.update({
+      where: { id },
+      data: {
+        supplierName: supplierName ?? existing.supplierName,
+        outletId: targetOutletId,
+        issueDate: issueDate ? new Date(issueDate) : existing.issueDate,
+        dueDate: dueDate ? new Date(dueDate) : existing.dueDate,
+        totalAmount: totalAmount !== undefined ? totalAmount : existing.totalAmount,
+        bankAccount: bankAccount ?? existing.bankAccount,
+        status: status ? (status as InvoiceStatus) : existing.status,
+        ...(Array.isArray(items) && items.length > 0
+          ? {
+              items: {
+                create: items.map((it: any) => ({
+                  itemName: it.itemName,
+                  quantity: Number(it.quantity) || 1,
+                  unit: it.unit || 'Pouch',
+                  unitCost: Number(it.unitCost) || 0,
+                  total: Number(it.total) || 0,
+                })),
+              },
+            }
+          : {}),
+      },
+      include: {
+        items: true,
+        outlet: { select: { name: true } },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Faktur tagihan ${updated.invoiceNumber} berhasil diperbarui`,
+      data: {
+        id: updated.id,
+        invoiceNumber: updated.invoiceNumber,
+        supplierName: updated.supplierName,
+        outletId: updated.outletId,
+        outletName: updated.outlet?.name || 'Outlet',
+        issueDate: updated.issueDate.toISOString().slice(0, 10),
+        dueDate: updated.dueDate.toISOString().slice(0, 10),
+        totalAmount: Number(updated.totalAmount),
+        status: updated.status,
+        bankAccount: updated.bankAccount,
+        paidAt: updated.paidAt ? updated.paidAt.toISOString().slice(0, 10) : undefined,
+        proofImageUrl: updated.proofImageUrl || undefined,
+        items: updated.items.map((it) => ({
+          itemName: it.itemName,
+          quantity: it.quantity,
+          unit: it.unit,
+          unitCost: Number(it.unitCost),
+          total: Number(it.total),
+        })),
+      },
+    });
+  } catch (error: any) {
+    console.error('[Invoice Update Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal memperbarui tagihan pabrik' });
+  }
+};
+
 export const deleteInvoice = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -147,4 +232,5 @@ export const deleteInvoice = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ success: false, message: error.message || 'Gagal menghapus tagihan pabrik' });
   }
 };
+
 
