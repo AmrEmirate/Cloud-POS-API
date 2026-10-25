@@ -344,3 +344,139 @@ export const deleteTenant = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message || 'Gagal menghapus tenant' });
   }
 };
+
+export const getTelemetry = async (_req: Request, res: Response) => {
+  try {
+    const startDb = Date.now();
+    await basePrisma.$queryRaw`SELECT 1`;
+    const dbLatencyMs = Date.now() - startDb;
+
+    const memoryUsage = process.memoryUsage();
+    const uptimeSeconds = Math.floor(process.uptime());
+
+    // 1. Core KPIs
+    const [
+      totalTenants,
+      activeTenants,
+      totalOutlets,
+      totalOrders,
+      totalGmvAgg,
+      totalUsers,
+    ] = await Promise.all([
+      basePrisma.tenant.count(),
+      basePrisma.tenant.count({ where: { status: 'ACTIVE' } }),
+      basePrisma.outlet.count(),
+      basePrisma.order.count(),
+      basePrisma.order.aggregate({ _sum: { total: true } }),
+      basePrisma.user.count(),
+    ]);
+
+    // 2. Today's orders & GMV
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [todayOrdersCount, todayGmvAgg] = await Promise.all([
+      basePrisma.order.count({ where: { createdAt: { gte: todayStart } } }),
+      basePrisma.order.aggregate({
+        where: { createdAt: { gte: todayStart } },
+        _sum: { total: true },
+      }),
+    ]);
+
+    // 3. Plan Distribution
+    const plans = await basePrisma.tenant.groupBy({
+      by: ['plan'],
+      _count: { id: true },
+    });
+
+    // 4. Recent Live Activity Stream (Recent 10 orders)
+    const recentOrders = await basePrisma.order.findMany({
+      take: 10,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        outlet: { select: { name: true } },
+        tenant: { select: { name: true, slug: true, themeColor: true } },
+      },
+    });
+
+    const recentTenants = await basePrisma.tenant.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, slug: true, plan: true, createdAt: true, themeColor: true },
+    });
+
+    // 5. 7-day Sales Trend (Grouped by date)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const pastOrders = await basePrisma.order.findMany({
+      where: { createdAt: { gte: sevenDaysAgo } },
+      select: { createdAt: true, total: true },
+    });
+
+    const trendMap: Record<string, { date: string; gmv: number; orders: number }> = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const key = d.toISOString().split('T')[0];
+      const label = d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
+      trendMap[key] = { date: label, gmv: 0, orders: 0 };
+    }
+
+    for (const ord of pastOrders) {
+      const key = ord.createdAt.toISOString().split('T')[0];
+      if (trendMap[key]) {
+        trendMap[key].gmv += Number(ord.total || 0);
+        trendMap[key].orders += 1;
+      }
+    }
+
+    const salesTrend = Object.values(trendMap);
+
+    res.json({
+      success: true,
+      data: {
+        system: {
+          status: 'HEALTHY',
+          uptimeSeconds,
+          nodeVersion: process.version,
+          dbLatencyMs,
+          memoryRssMb: Math.round(memoryUsage.rss / 1024 / 1024),
+          memoryHeapUsedMb: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+          memoryHeapTotalMb: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+          timestamp: new Date().toISOString(),
+        },
+        kpis: {
+          totalTenants,
+          activeTenants,
+          suspendedTenants: totalTenants - activeTenants,
+          totalOutlets,
+          totalUsers,
+          totalOrders,
+          totalGmv: Number(totalGmvAgg._sum.total || 0),
+          todayOrders: todayOrdersCount,
+          todayGmv: Number(todayGmvAgg._sum.total || 0),
+        },
+        planBreakdown: plans.map((p) => ({ plan: p.plan, count: p._count.id })),
+        salesTrend,
+        recentOrders: recentOrders.map((o) => ({
+          id: o.id,
+          invoiceNumber: o.invoiceNumber,
+          tenantName: o.tenant?.name || 'Dimsum Intan',
+          tenantSlug: o.tenant?.slug || 'dimsum-intan',
+          outletName: o.outlet?.name || 'Outlet',
+          total: Number(o.total),
+          paymentMethod: o.paymentMethod,
+          status: o.status,
+          createdAt: o.createdAt,
+        })),
+        recentTenants,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Superadmin Telemetry Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal memuat telemetri platform' });
+  }
+};
+

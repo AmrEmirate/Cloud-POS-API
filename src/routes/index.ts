@@ -39,6 +39,12 @@ apiRouter.get(
   superadminController.getStats
 );
 apiRouter.get(
+  '/superadmin/telemetry',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  superadminController.getTelemetry
+);
+apiRouter.get(
   '/superadmin/tenants',
   authenticateJwt,
   requireRole(['SUPERADMIN']),
