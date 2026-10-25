@@ -81,6 +81,10 @@ export const getTenants = async (_req: Request, res: Response) => {
       themeColor: t.themeColor || '#ea580c',
       plan: t.plan,
       status: t.status,
+      pricePerOutlet: Number(t.pricePerOutlet || 100000),
+      maxOutlets: t.maxOutlets,
+      dailyTxLimitPerOutlet: t.dailyTxLimitPerOutlet,
+      extraDailyTxLimit: t.extraDailyTxLimit,
       subscriptionExpiresAt: t.subscriptionExpiresAt,
       createdAt: t.createdAt,
       counts: {
@@ -276,7 +280,19 @@ export const createTenant = async (req: Request, res: Response) => {
 export const updateTenant = async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { name, themeColor, plan, status, customDomain, logoUrl, subscriptionExpiresAt } = req.body;
+    const {
+      name,
+      themeColor,
+      plan,
+      status,
+      customDomain,
+      logoUrl,
+      subscriptionExpiresAt,
+      maxOutlets,
+      dailyTxLimitPerOutlet,
+      extraDailyTxLimit,
+      pricePerOutlet,
+    } = req.body;
 
     const existing = await basePrisma.tenant.findUnique({
       where: { id },
@@ -292,6 +308,14 @@ export const updateTenant = async (req: Request, res: Response) => {
         ...(themeColor && { themeColor }),
         ...(plan && { plan }),
         ...(status && { status }),
+        ...(maxOutlets !== undefined && { maxOutlets: parseInt(String(maxOutlets)) }),
+        ...(dailyTxLimitPerOutlet !== undefined && {
+          dailyTxLimitPerOutlet: parseInt(String(dailyTxLimitPerOutlet)),
+        }),
+        ...(extraDailyTxLimit !== undefined && {
+          extraDailyTxLimit: parseInt(String(extraDailyTxLimit)),
+        }),
+        ...(pricePerOutlet !== undefined && { pricePerOutlet: parseFloat(String(pricePerOutlet)) }),
         ...(customDomain !== undefined && {
           customDomain: customDomain ? customDomain.trim().toLowerCase() : null,
         }),

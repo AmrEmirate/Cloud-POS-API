@@ -14,6 +14,7 @@ import * as expenseController from '../controllers/expenseController';
 import * as reportController from '../controllers/reportController';
 import * as publicController from '../controllers/publicController';
 import * as superadminController from '../controllers/superadminController';
+import * as billingController from '../controllers/billingController';
 
 export const apiRouter = Router();
 
@@ -139,3 +140,25 @@ apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['SUPERADMI
 
 // 12. Laporan Laba Rugi & Arus Kas Konsolidasi
 apiRouter.get('/reports/profit-loss', authenticateJwt, reportController.getProfitLoss);
+
+// 13. Manajemen Langganan, Kuota Outlet, & Payment Gateway
+apiRouter.get('/billing/status', authenticateJwt, billingController.getBillingStatus);
+apiRouter.post(
+  '/billing/checkout',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  billingController.createCheckout
+);
+apiRouter.get(
+  '/billing/invoices',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  billingController.getInvoices
+);
+apiRouter.post(
+  '/billing/pay-mock/:id',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  billingController.simulatePayInvoice
+);
+apiRouter.post('/billing/webhook/midtrans', billingController.handleMidtransWebhook);

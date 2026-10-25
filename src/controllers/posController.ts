@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../config/database';
+import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { OrderType, PaymentMethod, OrderStatus } from '@prisma/client';
 
@@ -113,6 +113,36 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         },
       },
     });
+
+    // Validasi Langganan & Kuota Transaksi Harian
+    const tenantId = req.user?.tenantId;
+    if (tenantId && req.user?.role !== 'SUPERADMIN') {
+      const tenant = await basePrisma.tenant.findUnique({
+        where: { id: tenantId },
+      });
+
+      if (tenant) {
+        // 1. Cek masa aktif langganan
+        if (tenant.subscriptionExpiresAt && new Date(tenant.subscriptionExpiresAt) < new Date()) {
+          return res.status(402).json({
+            success: false,
+            code: 'SUBSCRIPTION_EXPIRED',
+            message: 'Masa aktif langganan POS telah berakhir. Harap lakukan perpanjangan langganan untuk melanjutkan transaksi.',
+          });
+        }
+
+        // 2. Cek kuota transaksi harian per cabang (250 + extra)
+        const dailyLimit = tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit;
+        if (todayCount >= dailyLimit) {
+          return res.status(402).json({
+            success: false,
+            code: 'DAILY_TX_LIMIT_REACHED',
+            message: `Batas kuota harian cabang telah tercapai (${todayCount}/${dailyLimit} transaksi hari ini)! Silakan top-up kuota transaksi di menu Langganan & Billing.`,
+          });
+        }
+      }
+    }
+
     const invoiceNumber = `INV/${outletCode}/${todayStr}/${String(todayCount + 1).padStart(3, '0')}`;
 
     // Execute Prisma Transaction

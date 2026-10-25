@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { prisma } from '../config/database';
+import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 
 export const getOutlets = async (_req: Request, res: Response) => {
@@ -34,6 +34,22 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
         success: false,
         message: 'Kode cabang, nama, alamat, dan nomor telepon wajib diisi!',
       });
+    }
+
+    const tenantId = req.user?.tenantId;
+    if (tenantId && req.user?.role !== 'SUPERADMIN') {
+      const tenant = await basePrisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { outlets: { select: { id: true } } },
+      });
+
+      if (tenant && tenant.outlets.length >= tenant.maxOutlets) {
+        return res.status(402).json({
+          success: false,
+          code: 'OUTLET_LIMIT_REACHED',
+          message: `Batas kuota cabang telah tercapai (${tenant.outlets.length}/${tenant.maxOutlets} cabang). Harap lakukan pembayaran tambah outlet seharga Rp ${Number(tenant.pricePerOutlet).toLocaleString('id-ID')}/bulan terlebih dahulu!`,
+        });
+      }
     }
 
     const cleanCode = String(code).trim().toUpperCase();
