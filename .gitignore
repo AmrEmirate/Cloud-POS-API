@@ -3,8 +3,6 @@ node_modules/
 .pnp
 .pnp.js
 
-# Production build
-dist/
 
 # Environment variables & secrets
 .env
