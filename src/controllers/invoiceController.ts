@@ -89,9 +89,36 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    // Otomatis restock menu items yang berelasi dengan kiriman pabrik
+    if (items && Array.isArray(items)) {
+      for (const it of items) {
+        if (!it.itemName) continue;
+        const keywords = it.itemName.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter((w: string) => w.length > 2);
+        for (const kw of keywords) {
+          if (['beku', 'pouch', 'pcs', 'pack', 'dimsum'].includes(kw)) continue;
+          const matched = await prisma.menuItem.findFirst({
+            where: {
+              name: { contains: kw, mode: 'insensitive' },
+              isDeleted: false,
+            },
+          });
+          if (matched) {
+            // Misal 1 pouch isi 100 pcs = 25 porsi (4 pcs per porsi)
+            const multiplier = it.itemName.includes('100') ? 25 : (it.unit?.toLowerCase().includes('pouch') ? 10 : 1);
+            const addedStock = (parseInt(it.quantity) || 1) * multiplier;
+            await prisma.menuItem.update({
+              where: { id: matched.id },
+              data: { stock: { increment: addedStock } },
+            }).catch(() => null);
+            break;
+          }
+        }
+      }
+    }
+
     res.status(201).json({
       success: true,
-      message: `Faktur tagihan pabrik ${created.invoiceNumber} berhasil dicatat`,
+      message: `Faktur tagihan pabrik ${created.invoiceNumber} berhasil dicatat & stok otomatis disinkronkan`,
       data: {
         ...created,
         totalAmount: Number(created.totalAmount),

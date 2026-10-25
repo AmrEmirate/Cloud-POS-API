@@ -2,7 +2,6 @@ import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
-import { whatsappService } from '../services/whatsapp';
 import { OrderType, PaymentMethod, OrderStatus } from '@prisma/client';
 
 export const getOrders = async (req: AuthRequest, res: Response) => {
@@ -196,16 +195,6 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
       return ord;
     });
-
-    // Send WhatsApp notification if customer phone or outlet notification phone is available
-    const notifPhone = req.body.customerPhone || process.env.WA_NOTIFICATION_PHONE || outlet?.phone;
-    if (notifPhone) {
-      const cleanPhone = notifPhone.replace(/[^0-9]/g, '');
-      if (cleanPhone) {
-        const waMsg = `*NOTA PENJUALAN DIMSUM INTAN*\nNo: ${createdOrder.invoiceNumber}\nOutlet: ${createdOrder.outlet?.name || 'Dimsum Intan'}\nTotal: Rp ${Number(total).toLocaleString('id-ID')}\nMetode: ${paymentMethod}\nStatus: LUNAS. Terima kasih!`;
-        whatsappService.sendNotification(cleanPhone, waMsg).catch(() => null);
-      }
-    }
 
     res.status(201).json({
       success: true,
