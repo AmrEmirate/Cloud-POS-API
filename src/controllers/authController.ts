@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../config/database';
+import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dimsum_intan_super_secure_jwt_secret_key_2026';
@@ -18,15 +18,26 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username },
-      include: { outlet: true },
+    const cleanUsername = String(username).trim().toLowerCase();
+
+    // Look up user globally
+    const user = await basePrisma.user.findUnique({
+      where: { username: cleanUsername },
+      include: { outlet: true, tenant: true },
     });
 
     if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Pengguna tidak ditemukan atau kredensial salah',
+      });
+    }
+
+    // Verify tenant status if user belongs to a tenant
+    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role !== 'SUPERADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Akun bisnis (tenant) Anda sedang dinonaktifkan/disuspensi. Silakan hubungi admin platform.',
       });
     }
 
@@ -44,6 +55,9 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
+        tenantId: user.tenantId,
+        tenantSlug: user.tenant?.slug,
+        tenantName: user.tenant?.name,
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN as any }
@@ -59,7 +73,25 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
-        outletName: user.outlet ? user.outlet.name : (user.role === 'OWNER' ? 'Seluruh Outlet (Pusat)' : 'Supervisor Area'),
+        outletName: user.outlet
+          ? user.outlet.name
+          : user.role === 'SUPERADMIN'
+          ? 'Platform Superadmin'
+          : user.role === 'OWNER'
+          ? 'Seluruh Outlet (Pusat)'
+          : 'Supervisor Area',
+        tenant: user.tenant
+          ? {
+              id: user.tenant.id,
+              name: user.tenant.name,
+              slug: user.tenant.slug,
+              customDomain: user.tenant.customDomain,
+              logoUrl: user.tenant.logoUrl,
+              themeColor: user.tenant.themeColor || '#ea580c',
+              plan: user.tenant.plan,
+              status: user.tenant.status,
+            }
+          : null,
       },
     });
   } catch (error: any) {
@@ -74,9 +106,9 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, message: 'Tidak terotentikasi' });
     }
 
-    const user = await prisma.user.findUnique({
+    const user = await basePrisma.user.findUnique({
       where: { id: req.user.id },
-      include: { outlet: true },
+      include: { outlet: true, tenant: true },
     });
 
     if (!user) {
@@ -91,7 +123,25 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
-        outletName: user.outlet ? user.outlet.name : (user.role === 'OWNER' ? 'Seluruh Outlet (Pusat)' : 'Supervisor Area'),
+        outletName: user.outlet
+          ? user.outlet.name
+          : user.role === 'SUPERADMIN'
+          ? 'Platform Superadmin'
+          : user.role === 'OWNER'
+          ? 'Seluruh Outlet (Pusat)'
+          : 'Supervisor Area',
+        tenant: user.tenant
+          ? {
+              id: user.tenant.id,
+              name: user.tenant.name,
+              slug: user.tenant.slug,
+              customDomain: user.tenant.customDomain,
+              logoUrl: user.tenant.logoUrl,
+              themeColor: user.tenant.themeColor || '#ea580c',
+              plan: user.tenant.plan,
+              status: user.tenant.status,
+            }
+          : null,
       },
     });
   } catch (error: any) {
@@ -111,7 +161,7 @@ export const updatePin = async (req: AuthRequest, res: Response) => {
     }
 
     const pinHash = await bcrypt.hash(String(newPin), 10);
-    await prisma.user.update({
+    await basePrisma.user.update({
       where: { id: req.user.id },
       data: { pinHash },
     });
@@ -122,12 +172,20 @@ export const updatePin = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getUsers = async (_req: AuthRequest, res: Response) => {
+export const getUsers = async (req: AuthRequest, res: Response) => {
   try {
-    const users = await prisma.user.findMany({
-      include: { outlet: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const isSuperAdmin = req.user?.role === 'SUPERADMIN';
+    const targetTenantId = req.headers['x-tenant-id'] as string || req.user?.tenantId;
+
+    const users = await (isSuperAdmin && !targetTenantId
+      ? basePrisma.user.findMany({
+          include: { outlet: true, tenant: true },
+          orderBy: { createdAt: 'asc' },
+        })
+      : prisma.user.findMany({
+          include: { outlet: true, tenant: true },
+          orderBy: { createdAt: 'asc' },
+        }));
 
     const formatted = users.map((u) => ({
       id: u.id,
@@ -135,7 +193,15 @@ export const getUsers = async (_req: AuthRequest, res: Response) => {
       username: u.username,
       role: u.role,
       outletId: u.outletId,
-      outletName: u.outlet ? u.outlet.name : (u.role === 'OWNER' ? 'Seluruh Outlet (Pusat)' : 'Supervisor Area'),
+      outletName: u.outlet
+        ? u.outlet.name
+        : u.role === 'SUPERADMIN'
+        ? 'Platform Superadmin'
+        : u.role === 'OWNER'
+        ? 'Seluruh Outlet (Pusat)'
+        : 'Supervisor Area',
+      tenantId: u.tenantId,
+      tenantName: u.tenant ? u.tenant.name : 'Platform',
       createdAt: u.createdAt,
     }));
 
@@ -158,7 +224,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
 
     const cleanUsername = String(username).trim().toLowerCase();
 
-    const existing = await prisma.user.findUnique({
+    const existing = await basePrisma.user.findUnique({
       where: { username: cleanUsername },
     });
 
@@ -172,6 +238,10 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const passwordHash = await bcrypt.hash(String(password), 10);
     const pinHash = pin ? await bcrypt.hash(String(pin), 10) : null;
 
+    const tenantIdToAssign = req.user?.role === 'SUPERADMIN'
+      ? (req.body.tenantId || req.user?.tenantId || null)
+      : req.user?.tenantId;
+
     const newUser = await prisma.user.create({
       data: {
         name: String(name).trim(),
@@ -180,6 +250,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         pinHash,
         role,
         outletId: outletId || null,
+        tenantId: tenantIdToAssign,
       },
       include: { outlet: true },
     });
@@ -193,7 +264,11 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         username: newUser.username,
         role: newUser.role,
         outletId: newUser.outletId,
-        outletName: newUser.outlet ? newUser.outlet.name : (newUser.role === 'OWNER' ? 'Seluruh Outlet (Pusat)' : 'Supervisor Area'),
+        outletName: newUser.outlet
+          ? newUser.outlet.name
+          : newUser.role === 'OWNER'
+          ? 'Seluruh Outlet (Pusat)'
+          : 'Supervisor Area',
       },
     });
   } catch (error: any) {
@@ -212,27 +287,35 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const user = await prisma.user.findUnique({ where: { id } });
+    const user = await basePrisma.user.findUnique({ where: { id } });
     if (!user) {
       return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan' });
     }
 
-    if (user.role === 'OWNER') {
-      const ownerCount = await prisma.user.count({ where: { role: 'OWNER' } });
+    if (user.role === 'SUPERADMIN') {
+      const superadminCount = await basePrisma.user.count({ where: { role: 'SUPERADMIN' } });
+      if (superadminCount <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tidak dapat menghapus satu-satunya akun Superadmin platform!',
+        });
+      }
+    } else if (user.role === 'OWNER' && user.tenantId) {
+      const ownerCount = await basePrisma.user.count({
+        where: { role: 'OWNER', tenantId: user.tenantId },
+      });
       if (ownerCount <= 1) {
         return res.status(400).json({
           success: false,
-          message: 'Tidak dapat menghapus akun Owner utama terakhir!',
+          message: 'Tidak dapat menghapus akun Owner utama terakhir dari tenant ini!',
         });
       }
     }
 
-    await prisma.user.delete({ where: { id } });
+    await basePrisma.user.delete({ where: { id } });
 
     res.json({ success: true, message: 'Akun staf berhasil dihapus!' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message || 'Gagal menghapus pengguna' });
   }
 };
-
-

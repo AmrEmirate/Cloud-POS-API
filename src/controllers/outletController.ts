@@ -39,7 +39,7 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
     const cleanCode = String(code).trim().toUpperCase();
 
     // Check if code already exists
-    const existing = await prisma.outlet.findUnique({
+    const existing = await prisma.outlet.findFirst({
       where: { code: cleanCode },
     });
 
@@ -102,7 +102,7 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
     let cleanCode = existing.code;
     if (code && code.trim().toUpperCase() !== existing.code) {
       cleanCode = code.trim().toUpperCase();
-      const codeTaken = await prisma.outlet.findUnique({
+      const codeTaken = await prisma.outlet.findFirst({
         where: { code: cleanCode },
       });
       if (codeTaken) {

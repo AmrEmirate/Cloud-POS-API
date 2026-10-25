@@ -8,6 +8,7 @@ generator client {
 }
 
 enum Role {
+  SUPERADMIN
   OWNER
   SUPERVISOR
   KASIR
@@ -66,9 +67,35 @@ enum ExpenseStatus {
   TERJADWAL
 }
 
+model Tenant {
+  id                    String           @id @default(uuid())
+  name                  String
+  slug                  String           @unique
+  customDomain          String?          @unique
+  logoUrl               String?
+  themeColor            String?          @default("#f97316")
+  themeConfig           Json?
+  plan                  String           @default("STARTER") // STARTER, PRO, ENTERPRISE
+  status                String           @default("ACTIVE")  // ACTIVE, SUSPENDED
+  subscriptionExpiresAt DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  users                 User[]
+  outlets               Outlet[]
+  menus                 MenuItem[]
+  orders                Order[]
+  shifts                ShiftSession[]
+  pettyCash             PettyCash[]
+  factoryInvoices       FactoryInvoice[]
+  fixedExpenses         FixedExpense[]
+}
+
 model Outlet {
   id               String            @id @default(uuid())
-  code             String            @unique
+  tenantId         String?
+  tenant           Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code             String
   name             String
   city             String
   address          String
@@ -82,29 +109,38 @@ model Outlet {
   fixedExpenses    FixedExpense[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model User {
-  id               String            @id @default(uuid())
-  name             String
-  username         String            @unique
-  passwordHash     String
-  pinHash          String?           // Digunakan oleh Supervisor & Owner untuk otorisasi void & delete
-  role             Role
-  outletId         String?
-  outlet           Outlet?           @relation(fields: [outletId], references: [id])
-  shifts           ShiftSession[]
-  ordersProcessed  Order[]           @relation("CashierOrders")
-  ordersVoided     Order[]           @relation("VoidedOrders")
-  pettyCashCreated PettyCash[]       @relation("CashierPettyCash")
+  id                String            @id @default(uuid())
+  tenantId          String?
+  tenant            Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name              String
+  username          String            @unique
+  passwordHash      String
+  pinHash           String?           // Digunakan oleh Supervisor & Owner untuk otorisasi void & delete
+  role              Role
+  outletId          String?
+  outlet            Outlet?           @relation(fields: [outletId], references: [id])
+  shifts            ShiftSession[]
+  ordersProcessed   Order[]           @relation("CashierOrders")
+  ordersVoided      Order[]           @relation("VoidedOrders")
+  pettyCashCreated  PettyCash[]       @relation("CashierPettyCash")
   pettyCashVerified PettyCash[]      @relation("VerifiedPettyCash")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([tenantId])
 }
 
 model MenuItem {
   id          String      @id @default(uuid())
-  code        String      @unique
+  tenantId    String?
+  tenant      Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code        String
   name        String
   category    String      // mentai, kukus, goreng, minuman
   price       Decimal     @db.Decimal(10, 2)
@@ -117,10 +153,15 @@ model MenuItem {
   orderItems  OrderItem[]
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model Order {
   id             String        @id @default(uuid())
+  tenantId       String?
+  tenant         Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoiceNumber  String        @unique
   outletId       String
   outlet         Outlet        @relation(fields: [outletId], references: [id])
@@ -143,6 +184,8 @@ model Order {
   items          OrderItem[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@index([tenantId])
 }
 
 model OrderItem {
@@ -160,6 +203,8 @@ model OrderItem {
 
 model ShiftSession {
   id               String      @id @default(uuid())
+  tenantId         String?
+  tenant           Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   shiftName        String
   outletId         String
   outlet           Outlet      @relation(fields: [outletId], references: [id])
@@ -179,10 +224,14 @@ model ShiftSession {
   status           ShiftStatus @default(ACTIVE)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
+
+  @@index([tenantId])
 }
 
 model PettyCash {
   id              String            @id @default(uuid())
+  tenantId        String?
+  tenant          Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   expenseNumber   String            @unique
   outletId        String
   outlet          Outlet            @relation(fields: [outletId], references: [id])
@@ -198,10 +247,14 @@ model PettyCash {
   verifiedAt      DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  @@index([tenantId])
 }
 
 model FactoryInvoice {
   id            String               @id @default(uuid())
+  tenantId      String?
+  tenant        Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoiceNumber String               @unique
   supplierName  String               @default("PT Dimsum Prima Rasa")
   outletId      String
@@ -216,6 +269,8 @@ model FactoryInvoice {
   items         FactoryInvoiceItem[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
+
+  @@index([tenantId])
 }
 
 model FactoryInvoiceItem {
@@ -231,6 +286,8 @@ model FactoryInvoiceItem {
 
 model FixedExpense {
   id        String               @id @default(uuid())
+  tenantId  String?
+  tenant    Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   code      String               @unique
   title     String
   category  FixedExpenseCategory
@@ -243,4 +300,6 @@ model FixedExpense {
   autoDebet Boolean              @default(false)
   createdAt DateTime             @default(now())
   updatedAt DateTime             @updatedAt
+
+  @@index([tenantId])
 }
