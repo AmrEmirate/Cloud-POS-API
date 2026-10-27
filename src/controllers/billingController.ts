@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { basePrisma, prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { PaymentGatewayService } from '../services/paymentGateway';
+import { getPlanDetails, SAAS_PLANS } from '../config/plans';
 
 export const getBillingStatus = async (req: AuthRequest, res: Response) => {
   try {
@@ -21,6 +22,8 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
+    const currentPlan = getPlanDetails(tenant.plan);
+
     // Hitung transaksi hari ini
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -31,22 +34,49 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Breakdown transaksi per outlet hari ini
+    // Hitung transaksi bulan ini (untuk perhitungan kuota bulanan)
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const monthOrdersCount = await prisma.order.count({
+      where: {
+        createdAt: { gte: startOfMonth },
+      },
+    });
+
+    // Breakdown transaksi per outlet hari ini & bulan ini
     const outletStats = await Promise.all(
       tenant.outlets.map(async (o) => {
-        const count = await prisma.order.count({
-          where: {
-            outletId: o.id,
-            createdAt: { gte: startOfToday },
-          },
-        });
+        const [todayCount, monthCount] = await Promise.all([
+          prisma.order.count({
+            where: {
+              outletId: o.id,
+              createdAt: { gte: startOfToday },
+            },
+          }),
+          prisma.order.count({
+            where: {
+              outletId: o.id,
+              createdAt: { gte: startOfMonth },
+            },
+          }),
+        ]);
+
+        const isUnlimited = tenant.dailyTxLimitPerOutlet === 0;
+        const dailyLimit = isUnlimited ? 0 : tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit;
+        const monthlyLimit = isUnlimited ? 0 : (dailyLimit * 30);
+
         return {
           id: o.id,
           code: o.code,
           name: o.name,
-          todayOrders: count,
-          dailyLimit: tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit,
-          remaining: Math.max(0, (tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit) - count),
+          todayOrders: todayCount,
+          monthOrders: monthCount,
+          isUnlimited,
+          dailyLimit,
+          monthlyLimit,
+          remainingMonth: isUnlimited ? 'UNLIMITED' : Math.max(0, monthlyLimit - monthCount),
         };
       })
     );
@@ -64,19 +94,24 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
         tenantId: tenant.id,
         tenantName: tenant.name,
         plan: tenant.plan,
+        planDetails: currentPlan,
         status: tenant.status,
+        licenseKey: tenant.licenseKey,
         pricePerOutlet: Number(tenant.pricePerOutlet),
         currentOutletsCount: tenant.outlets.length,
         maxOutlets: tenant.maxOutlets,
         canAddOutlet: tenant.outlets.length < tenant.maxOutlets,
         dailyTxLimitPerOutlet: tenant.dailyTxLimitPerOutlet,
+        monthlyTxLimitPerOutlet: currentPlan.monthlyTxLimit,
+        isUnlimited: tenant.dailyTxLimitPerOutlet === 0,
         extraDailyTxLimit: tenant.extraDailyTxLimit,
-        effectiveDailyTxLimit: tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit,
         todayOrdersCount,
+        monthOrdersCount,
         isSubscriptionActive,
         subscriptionExpiresAt: expiresAt?.toISOString() || null,
         daysRemaining,
         outlets: outletStats,
+        availablePlans: Object.values(SAAS_PLANS),
       },
     });
   } catch (error: any) {
@@ -97,7 +132,7 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
-    const { type, quantity = 1, extraTxQuota = 250, months = 1 } = req.body;
+    const { type, quantity = 1, extraTxQuota = 250, months = 1, targetPlan } = req.body;
 
     let amount = 0;
     let description = '';
@@ -128,6 +163,14 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       amount = pricePerOutlet * totalOutlets * m;
       description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
       metadata.months = m;
+    } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
+      const planInfo = getPlanDetails(targetPlan);
+      const totalOutlets = Math.max(1, tenant.maxOutlets);
+      amount = planInfo.price * totalOutlets;
+      description = `Upgrade Paket SaaS ke ${planInfo.name} (${totalOutlets} Cabang)`;
+      metadata.newPlan = planInfo.code;
+      metadata.newPrice = planInfo.price;
+      metadata.newDailyLimit = planInfo.dailyTxLimit;
     } else {
       return res.status(400).json({ success: false, message: 'Tipe pembayaran tagihan tidak valid!' });
     }
@@ -244,6 +287,14 @@ export const simulatePayInvoice = async (req: AuthRequest, res: Response) => {
       const newExpiry = new Date(baseDate.getTime() + months * 30 * 24 * 60 * 60 * 1000);
       updateData.subscriptionExpiresAt = newExpiry;
       updateData.status = 'ACTIVE';
+    } else if (invoice.type === 'CHANGE_PLAN' || invoice.type === 'UPGRADE_PLAN') {
+      if (metadata.newPlan) {
+        const planInfo = getPlanDetails(metadata.newPlan);
+        updateData.plan = planInfo.code;
+        updateData.pricePerOutlet = planInfo.price;
+        updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
+        updateData.status = 'ACTIVE';
+      }
     }
 
     await basePrisma.tenant.update({
@@ -322,6 +373,14 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
         const newExpiry = new Date(baseDate.getTime() + months * 30 * 24 * 60 * 60 * 1000);
         updateData.subscriptionExpiresAt = newExpiry;
         updateData.status = 'ACTIVE';
+      } else if (invoice.type === 'CHANGE_PLAN' || invoice.type === 'UPGRADE_PLAN') {
+        if (metadata.newPlan) {
+          const planInfo = getPlanDetails(metadata.newPlan);
+          updateData.plan = planInfo.code;
+          updateData.pricePerOutlet = planInfo.price;
+          updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
+          updateData.status = 'ACTIVE';
+        }
       }
 
       await basePrisma.tenant.update({

@@ -122,6 +122,15 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
 
       if (tenant) {
+        // 0. Cek status aktif/suspensi (Remote Kill-Switch)
+        if (tenant.status === 'SUSPENDED') {
+          return res.status(403).json({
+            success: false,
+            code: 'TENANT_SUSPENDED',
+            message: 'Operasional kasir terkunci (Remote Kill-Switch). Status akun sedang dinonaktifkan/menunggak tagihan.',
+          });
+        }
+
         // 1. Cek masa aktif langganan
         if (tenant.subscriptionExpiresAt && new Date(tenant.subscriptionExpiresAt) < new Date()) {
           return res.status(402).json({
@@ -131,14 +140,29 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // 2. Cek kuota transaksi harian per cabang (250 + extra)
-        const dailyLimit = tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit;
-        if (todayCount >= dailyLimit) {
-          return res.status(402).json({
-            success: false,
-            code: 'DAILY_TX_LIMIT_REACHED',
-            message: `Batas kuota harian cabang telah tercapai (${todayCount}/${dailyLimit} transaksi hari ini)! Silakan top-up kuota transaksi di menu Langganan & Billing.`,
+        // 2. Cek kuota transaksi bulanan (dihitung per bulan dari limit harian x 30)
+        // dailyTxLimitPerOutlet === 0 menandakan paket UNLIMITED
+        const dailyLimit = tenant.dailyTxLimitPerOutlet;
+        if (dailyLimit > 0) {
+          const effectiveMonthlyLimit = (dailyLimit * 30) + (tenant.extraDailyTxLimit * 30);
+          const startOfMonth = new Date();
+          startOfMonth.setDate(1);
+          startOfMonth.setHours(0, 0, 0, 0);
+
+          const monthCount = await prisma.order.count({
+            where: {
+              outletId: targetOutletId,
+              createdAt: { gte: startOfMonth },
+            },
           });
+
+          if (monthCount >= effectiveMonthlyLimit) {
+            return res.status(402).json({
+              success: false,
+              code: 'DAILY_TX_LIMIT_REACHED',
+              message: `Batas kuota transaksi bulanan cabang telah tercapai (${monthCount}/${effectiveMonthlyLimit} transaksi bulan ini - dihitung dari ${dailyLimit} tx/hari)! Silakan top-up kuota transaksi atau upgrade paket di menu Billing.`,
+            });
+          }
         }
       }
     }

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { basePrisma } from '../config/database';
 import { Role } from '@prisma/client';
+import { getPlanDetails } from '../config/plans';
 
 export const getStats = async (_req: Request, res: Response) => {
   try {
@@ -81,6 +82,7 @@ export const getTenants = async (_req: Request, res: Response) => {
       themeColor: t.themeColor || '#ea580c',
       plan: t.plan,
       status: t.status,
+      licenseKey: t.licenseKey,
       pricePerOutlet: Number(t.pricePerOutlet || 100000),
       maxOutlets: t.maxOutlets,
       dailyTxLimitPerOutlet: t.dailyTxLimitPerOutlet,
@@ -158,6 +160,7 @@ export const createTenant = async (req: Request, res: Response) => {
 
     const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
     const ownerPinHash = await bcrypt.hash('1234', 10);
+    const planConfig = getPlanDetails(plan);
 
     // Transaction to create Tenant, Outlet, Owner User, and initial menus
     const result = await basePrisma.$transaction(async (tx) => {
@@ -167,7 +170,10 @@ export const createTenant = async (req: Request, res: Response) => {
           name: name.trim(),
           slug,
           themeColor,
-          plan,
+          plan: planConfig.code,
+          pricePerOutlet: planConfig.price,
+          dailyTxLimitPerOutlet: planConfig.dailyTxLimit,
+          licenseKey: req.body.licenseKey ? String(req.body.licenseKey).trim() : null,
           customDomain: customDomain ? customDomain.trim().toLowerCase() : null,
           status: 'ACTIVE',
         },
@@ -306,8 +312,15 @@ export const updateTenant = async (req: Request, res: Response) => {
       data: {
         ...(name && { name: name.trim() }),
         ...(themeColor && { themeColor }),
-        ...(plan && { plan }),
+        ...(plan && {
+          plan: getPlanDetails(plan).code,
+          ...(pricePerOutlet === undefined && { pricePerOutlet: getPlanDetails(plan).price }),
+          ...(dailyTxLimitPerOutlet === undefined && { dailyTxLimitPerOutlet: getPlanDetails(plan).dailyTxLimit }),
+        }),
         ...(status && { status }),
+        ...(req.body.licenseKey !== undefined && {
+          licenseKey: req.body.licenseKey ? String(req.body.licenseKey).trim() : null,
+        }),
         ...(maxOutlets !== undefined && { maxOutlets: parseInt(String(maxOutlets)) }),
         ...(dailyTxLimitPerOutlet !== undefined && {
           dailyTxLimitPerOutlet: parseInt(String(dailyTxLimitPerOutlet)),

@@ -15,6 +15,7 @@ import * as reportController from '../controllers/reportController';
 import * as publicController from '../controllers/publicController';
 import * as superadminController from '../controllers/superadminController';
 import * as billingController from '../controllers/billingController';
+import * as internalSyncController from '../controllers/internalSyncController';
 
 export const apiRouter = Router();
 
@@ -162,3 +163,32 @@ apiRouter.post(
   billingController.simulatePayInvoice
 );
 apiRouter.post('/billing/webhook/midtrans', billingController.handleMidtransWebhook);
+
+// 14. Paket Lisensi & Integrasi ProtekSales (Inter-Service Communication)
+apiRouter.get('/plans', internalSyncController.getAvailablePlans);
+apiRouter.post('/license/heartbeat', internalSyncController.checkHeartbeat);
+apiRouter.post(
+  '/internal/sync-license',
+  internalSyncController.verifyInternalServiceSecret,
+  internalSyncController.syncLicenseStatus
+);
+apiRouter.post(
+  '/internal/provision-tenant',
+  internalSyncController.verifyInternalServiceSecret,
+  internalSyncController.provisionTenant
+);
+apiRouter.get(
+  '/internal/tenant/:licenseKey',
+  internalSyncController.verifyInternalServiceSecret,
+  internalSyncController.getTenantByLicense
+);
+apiRouter.get(
+  '/internal/tenants',
+  internalSyncController.verifyInternalServiceSecret,
+  internalSyncController.getAllTenants
+);
+apiRouter.get(
+  '/internal/analytics',
+  internalSyncController.verifyInternalServiceSecret,
+  internalSyncController.getPlatformAnalytics
+);
