@@ -10,7 +10,7 @@ export interface PlanConfig {
 export const SAAS_PLANS: Record<string, PlanConfig> = {
   PAKET_100K: {
     code: 'PAKET_100K',
-    name: 'Paket Hemat (200 Tx/Hari)',
+    name: 'Paket 1: Hemat (200 Tx/Hari)',
     price: 100000,
     dailyTxLimit: 200,
     monthlyTxLimit: 6000, // 200 x 30 hari
@@ -18,7 +18,7 @@ export const SAAS_PLANS: Record<string, PlanConfig> = {
   },
   PAKET_150K: {
     code: 'PAKET_150K',
-    name: 'Paket Bisnis (300 Tx/Hari)',
+    name: 'Paket 2: Bisnis (300 Tx/Hari)',
     price: 150000,
     dailyTxLimit: 300,
     monthlyTxLimit: 9000, // 300 x 30 hari
@@ -26,7 +26,7 @@ export const SAAS_PLANS: Record<string, PlanConfig> = {
   },
   PAKET_200K: {
     code: 'PAKET_200K',
-    name: 'Paket Pro (500 Tx/Hari)',
+    name: 'Paket 3: Pro (500 Tx/Hari)',
     price: 200000,
     dailyTxLimit: 500,
     monthlyTxLimit: 15000, // 500 x 30 hari
@@ -34,27 +34,35 @@ export const SAAS_PLANS: Record<string, PlanConfig> = {
   },
   PAKET_250K: {
     code: 'PAKET_250K',
-    name: 'Paket Unlimited (Tanpa Batas)',
+    name: 'Paket 4: Unlimited (Tanpa Batas)',
     price: 250000,
     dailyTxLimit: 0,
     monthlyTxLimit: 0,
-    description: 'Rp 250.000 / bln - Transaksi tanpa batas kuota (Unlimited)',
+    description: 'Rp 250.000 / bln - Unlimited transaksi selama sebulan (Tanpa Batas Kuota)',
   },
 };
 
 /**
  * Helper untuk normalisasi kode paket dan mendapatkan detail batas kuota & tarif
  */
-export const getPlanDetails = (planCode?: string | null): PlanConfig => {
+export const getPlanDetails = (planCode?: string | number | null): PlanConfig => {
   if (!planCode) return SAAS_PLANS.PAKET_100K;
-  const upper = planCode.toUpperCase().trim();
+
+  if (typeof planCode === 'number') {
+    if (planCode <= 100000) return SAAS_PLANS.PAKET_100K;
+    if (planCode <= 150000) return SAAS_PLANS.PAKET_150K;
+    if (planCode <= 200000) return SAAS_PLANS.PAKET_200K;
+    return SAAS_PLANS.PAKET_250K;
+  }
+
+  const upper = String(planCode).toUpperCase().trim();
   if (SAAS_PLANS[upper]) return SAAS_PLANS[upper];
 
   // Aliases fallback
-  if (upper === 'STARTER' || upper === 'REGULAR') return SAAS_PLANS.PAKET_100K;
-  if (upper === 'GROWTH') return SAAS_PLANS.PAKET_150K;
-  if (upper === 'PRO') return SAAS_PLANS.PAKET_200K;
-  if (upper === 'ENTERPRISE') return SAAS_PLANS.PAKET_250K;
+  if (upper.includes('100') || upper === 'STARTER' || upper === 'REGULAR' || upper === 'HEMAT') return SAAS_PLANS.PAKET_100K;
+  if (upper.includes('150') || upper === 'GROWTH' || upper === 'STANDARD' || upper === 'BISNIS' || upper === 'BUSINESS') return SAAS_PLANS.PAKET_150K;
+  if (upper.includes('200') || upper === 'PRO') return SAAS_PLANS.PAKET_200K;
+  if (upper.includes('250') || upper === 'ENTERPRISE' || upper === 'UNLIMITED') return SAAS_PLANS.PAKET_250K;
 
   return SAAS_PLANS.PAKET_100K;
 };

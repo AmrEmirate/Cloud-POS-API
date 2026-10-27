@@ -111,7 +111,7 @@ export const createTenant = async (req: Request, res: Response) => {
       name,
       slug: rawSlug,
       themeColor = '#ea580c',
-      plan = 'PRO',
+      plan = 'PAKET_100K',
       customDomain,
       ownerUsername,
       ownerPassword,

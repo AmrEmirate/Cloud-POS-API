@@ -63,8 +63,11 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
           }),
         ]);
 
-        const isUnlimited = tenant.dailyTxLimitPerOutlet === 0;
-        const dailyLimit = isUnlimited ? 0 : tenant.dailyTxLimitPerOutlet + tenant.extraDailyTxLimit;
+        const isUnlimited = tenant.dailyTxLimitPerOutlet === 0 || currentPlan.dailyTxLimit === 0;
+        const baseDaily = (tenant.dailyTxLimitPerOutlet !== undefined && tenant.dailyTxLimitPerOutlet !== null)
+          ? tenant.dailyTxLimitPerOutlet
+          : currentPlan.dailyTxLimit;
+        const dailyLimit = isUnlimited ? 0 : baseDaily + (tenant.extraDailyTxLimit || 0);
         const monthlyLimit = isUnlimited ? 0 : (dailyLimit * 30);
 
         return {
@@ -76,6 +79,7 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
           isUnlimited,
           dailyLimit,
           monthlyLimit,
+          remaining: isUnlimited ? 'UNLIMITED' : Math.max(0, dailyLimit - todayCount),
           remainingMonth: isUnlimited ? 'UNLIMITED' : Math.max(0, monthlyLimit - monthCount),
         };
       })
@@ -87,6 +91,14 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
     const daysRemaining = expiresAt
       ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
       : 30;
+
+    const isUnlimited = tenant.dailyTxLimitPerOutlet === 0 || currentPlan.dailyTxLimit === 0;
+    const baseDaily = (tenant.dailyTxLimitPerOutlet !== undefined && tenant.dailyTxLimitPerOutlet !== null)
+      ? tenant.dailyTxLimitPerOutlet
+      : currentPlan.dailyTxLimit;
+    const effectiveDailyTxLimit = isUnlimited ? 0 : baseDaily + (tenant.extraDailyTxLimit || 0);
+    const effectiveMonthlyTxLimit = isUnlimited ? 0 : effectiveDailyTxLimit * 30;
+    const remainingMonthOrders = isUnlimited ? 'UNLIMITED' : Math.max(0, effectiveMonthlyTxLimit - monthOrdersCount);
 
     res.json({
       success: true,
@@ -103,7 +115,10 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
         canAddOutlet: tenant.outlets.length < tenant.maxOutlets,
         dailyTxLimitPerOutlet: tenant.dailyTxLimitPerOutlet,
         monthlyTxLimitPerOutlet: currentPlan.monthlyTxLimit,
-        isUnlimited: tenant.dailyTxLimitPerOutlet === 0,
+        effectiveDailyTxLimit,
+        effectiveMonthlyTxLimit,
+        remainingMonthOrders,
+        isUnlimited,
         extraDailyTxLimit: tenant.extraDailyTxLimit,
         todayOrdersCount,
         monthOrdersCount,

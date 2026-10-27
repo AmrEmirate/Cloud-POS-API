@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { OrderType, PaymentMethod, OrderStatus } from '@prisma/client';
+import { getPlanDetails } from '../config/plans';
 
 export const getOrders = async (req: AuthRequest, res: Response) => {
   try {
@@ -142,9 +143,12 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
         // 2. Cek kuota transaksi bulanan (dihitung per bulan dari limit harian x 30)
         // dailyTxLimitPerOutlet === 0 menandakan paket UNLIMITED
-        const dailyLimit = tenant.dailyTxLimitPerOutlet;
+        const planConfig = getPlanDetails(tenant.plan);
+        const dailyLimit = tenant.dailyTxLimitPerOutlet !== undefined && tenant.dailyTxLimitPerOutlet !== null
+          ? tenant.dailyTxLimitPerOutlet
+          : planConfig.dailyTxLimit;
         if (dailyLimit > 0) {
-          const effectiveMonthlyLimit = (dailyLimit * 30) + (tenant.extraDailyTxLimit * 30);
+          const effectiveMonthlyLimit = (dailyLimit * 30) + ((tenant.extraDailyTxLimit || 0) * 30);
           const startOfMonth = new Date();
           startOfMonth.setDate(1);
           startOfMonth.setHours(0, 0, 0, 0);

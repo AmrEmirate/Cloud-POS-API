@@ -75,11 +75,11 @@ model Tenant {
   logoUrl               String?
   themeColor            String?          @default("#f97316")
   themeConfig           Json?
-  plan                  String           @default("REGULAR") // REGULAR, PRO, ENTERPRISE
+  plan                  String           @default("PAKET_100K") // PAKET_100K, PAKET_150K, PAKET_200K, PAKET_250K
   status                String           @default("ACTIVE")  // ACTIVE, SUSPENDED
   pricePerOutlet        Decimal          @default(100000) @db.Decimal(12, 2)
   maxOutlets            Int              @default(1)
-  dailyTxLimitPerOutlet Int              @default(250)
+  dailyTxLimitPerOutlet Int              @default(200)
   extraDailyTxLimit     Int              @default(0)
   subscriptionExpiresAt DateTime?
   licenseKey            String?          @unique
