@@ -41,7 +41,7 @@ export const createSubscriptionCheckout = async (req: AuthRequest, res: Response
       else price = 45000;
 
       amount = price;
-      description = `Penambahan Kuota Transaksi +${quota} Tx/Hari per Cabang`;
+      description = `Penambahan Kuota Transaksi +${(quota * 30).toLocaleString('id-ID')} Tx/Bulan per Cabang`;
       metadata.extraTxQuota = quota;
     } else if (type === 'RENEWAL') {
       const m = Math.max(1, parseInt(String(months)) || 1);

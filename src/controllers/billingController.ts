@@ -163,14 +163,14 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
     } else if (type === 'ADD_TX_QUOTA') {
       const quota = parseInt(String(extraTxQuota)) || 250;
       // Tarif kuota transaksi harian tambahan:
-      // 100 tx/hari = Rp 15.000, 250 tx/hari = Rp 25.000, 500 tx/hari = Rp 45.000
+      // +3.000 tx/bln = Rp 15.000, +7.500 tx/bln = Rp 25.000, +15.000 tx/bln = Rp 45.000
       let price = 25000;
       if (quota <= 100) price = 15000;
       else if (quota <= 250) price = 25000;
       else price = 45000;
 
       amount = price;
-      description = `Penambahan Kuota Transaksi +${quota} Tx/Hari per Cabang`;
+      description = `Penambahan Kuota Transaksi +${(quota * 30).toLocaleString('id-ID')} Tx/Bulan per Cabang`;
       metadata.extraTxQuota = quota;
     } else if (type === 'RENEWAL') {
       const m = Math.max(1, parseInt(String(months)) || 1);

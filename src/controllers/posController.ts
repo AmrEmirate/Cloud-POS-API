@@ -142,14 +142,17 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // 2. Cek kuota transaksi bulanan (dihitung per bulan dari limit harian x 30)
-        // dailyTxLimitPerOutlet === 0 menandakan paket UNLIMITED
+        // 2. Cek kuota transaksi bulanan (murni per bulan)
+        // monthlyTxLimit === 0 menandakan paket UNLIMITED
         const planConfig = getPlanDetails(tenant.plan);
-        const dailyLimit = tenant.dailyTxLimitPerOutlet !== undefined && tenant.dailyTxLimitPerOutlet !== null
-          ? tenant.dailyTxLimitPerOutlet
-          : planConfig.dailyTxLimit;
-        if (dailyLimit > 0) {
-          const effectiveMonthlyLimit = (dailyLimit * 30) + ((tenant.extraDailyTxLimit || 0) * 30);
+        const baseMonthlyLimit = planConfig.monthlyTxLimit > 0
+          ? planConfig.monthlyTxLimit
+          : (tenant.dailyTxLimitPerOutlet ? tenant.dailyTxLimitPerOutlet * 30 : 6000);
+        const isUnlimited = planConfig.monthlyTxLimit === 0 || tenant.dailyTxLimitPerOutlet === 0;
+
+        if (!isUnlimited) {
+          const extraMonthly = (tenant.extraDailyTxLimit || 0) * 30;
+          const effectiveMonthlyLimit = baseMonthlyLimit + extraMonthly;
           const startOfMonth = new Date();
           startOfMonth.setDate(1);
           startOfMonth.setHours(0, 0, 0, 0);
@@ -164,8 +167,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           if (monthCount >= effectiveMonthlyLimit) {
             return res.status(402).json({
               success: false,
-              code: 'DAILY_TX_LIMIT_REACHED',
-              message: `Batas kuota transaksi bulanan cabang telah tercapai (${monthCount}/${effectiveMonthlyLimit} transaksi bulan ini - dihitung dari ${dailyLimit} tx/hari)! Silakan top-up kuota transaksi atau upgrade paket di menu Billing.`,
+              code: 'MONTHLY_TX_LIMIT_REACHED',
+              message: `Batas kuota transaksi bulanan cabang telah tercapai (${monthCount}/${effectiveMonthlyLimit} transaksi bulan ini)! Silakan top-up kuota transaksi atau upgrade paket di menu Billing.`,
             });
           }
         }

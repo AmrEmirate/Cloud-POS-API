@@ -10,27 +10,27 @@ export interface PlanConfig {
 export const SAAS_PLANS: Record<string, PlanConfig> = {
   PAKET_100K: {
     code: 'PAKET_100K',
-    name: 'Paket 1: Hemat (200 Tx/Hari)',
+    name: 'Paket 1: Hemat (6.000 Tx/Bulan)',
     price: 100000,
     dailyTxLimit: 200,
-    monthlyTxLimit: 6000, // 200 x 30 hari
-    description: 'Rp 100.000 / bln - 200 transaksi per hari dihitung per bulan (6.000 tx/bln)',
+    monthlyTxLimit: 6000,
+    description: 'Rp 100.000 / bln - Kuota 6.000 transaksi per bulan',
   },
   PAKET_150K: {
     code: 'PAKET_150K',
-    name: 'Paket 2: Bisnis (300 Tx/Hari)',
+    name: 'Paket 2: Bisnis (9.000 Tx/Bulan)',
     price: 150000,
     dailyTxLimit: 300,
-    monthlyTxLimit: 9000, // 300 x 30 hari
-    description: 'Rp 150.000 / bln - 300 transaksi per hari dihitung per bulan (9.000 tx/bln)',
+    monthlyTxLimit: 9000,
+    description: 'Rp 150.000 / bln - Kuota 9.000 transaksi per bulan',
   },
   PAKET_200K: {
     code: 'PAKET_200K',
-    name: 'Paket 3: Pro (500 Tx/Hari)',
+    name: 'Paket 3: Pro (15.000 Tx/Bulan)',
     price: 200000,
     dailyTxLimit: 500,
-    monthlyTxLimit: 15000, // 500 x 30 hari
-    description: 'Rp 200.000 / bln - 500 transaksi per hari dihitung per bulan (15.000 tx/bln)',
+    monthlyTxLimit: 15000,
+    description: 'Rp 200.000 / bln - Kuota 15.000 transaksi per bulan',
   },
   PAKET_250K: {
     code: 'PAKET_250K',
@@ -38,7 +38,7 @@ export const SAAS_PLANS: Record<string, PlanConfig> = {
     price: 250000,
     dailyTxLimit: 0,
     monthlyTxLimit: 0,
-    description: 'Rp 250.000 / bln - Unlimited transaksi selama sebulan (Tanpa Batas Kuota)',
+    description: 'Rp 250.000 / bln - Unlimited transaksi per bulan (Tanpa Batas Kuota)',
   },
 };
 
