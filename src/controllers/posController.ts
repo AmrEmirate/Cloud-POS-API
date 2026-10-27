@@ -4,6 +4,7 @@ import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { OrderType, PaymentMethod, OrderStatus } from '@prisma/client';
 import { getPlanDetails } from '../config/plans';
+import { WalletService } from '../services/walletService';
 
 export const getOrders = async (req: AuthRequest, res: Response) => {
   try {
@@ -173,6 +174,13 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
     const invoiceNumber = `INV/${outletCode}/${todayStr}/${String(todayCount + 1).padStart(3, '0')}`;
 
+    let targetPaymentMethod: PaymentMethod = PaymentMethod.CASH;
+    if (paymentMethod === 'DUITKU_QRIS') {
+      targetPaymentMethod = PaymentMethod.DUITKU_QRIS;
+    } else if (paymentMethod === 'QRIS') {
+      targetPaymentMethod = PaymentMethod.QRIS;
+    }
+
     // Execute Prisma Transaction
     const createdOrder = await prisma.$transaction(async (tx) => {
       // 1. Create Order
@@ -187,7 +195,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           discount: discount,
           total: total,
           hppTotal: hppTotal,
-          paymentMethod: paymentMethod === 'QRIS' ? PaymentMethod.QRIS : PaymentMethod.CASH,
+          paymentMethod: targetPaymentMethod,
           cashReceived: cashReceived || null,
           changeAmount: changeAmount || null,
           cashierId: cashierId,
@@ -233,7 +241,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
 
       if (activeShift) {
-        if (paymentMethod === 'CASH') {
+        if (targetPaymentMethod === PaymentMethod.CASH) {
           await tx.shiftSession.update({
             where: { id: activeShift.id },
             data: {
@@ -253,6 +261,20 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
       return ord;
     });
+
+    // 4. Jika pembayaran menggunakan DUITKU_QRIS, otomatis tambahkan saldo ke dompet tenant
+    if (targetPaymentMethod === PaymentMethod.DUITKU_QRIS && tenantId) {
+      await WalletService.creditBalance({
+        tenantId,
+        outletId: targetOutletId,
+        amount: total,
+        category: 'POS_SALES',
+        referenceId: createdOrder.id,
+        description: `Penjualan Kasir POS (Duitku QRIS) - Nota ${createdOrder.invoiceNumber}`,
+      }).catch((err) => {
+        console.error('Gagal mencatat mutasi dompet kasir Duitku:', err);
+      });
+    }
 
     res.status(201).json({
       success: true,

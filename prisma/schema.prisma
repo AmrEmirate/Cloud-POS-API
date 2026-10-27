@@ -22,11 +22,13 @@ enum OrderType {
 enum PaymentMethod {
   CASH
   QRIS
+  DUITKU_QRIS
 }
 
 enum OrderStatus {
   PAID
   VOIDED
+  PENDING_PAYMENT
 }
 
 enum ShiftStatus {
@@ -86,6 +88,12 @@ model Tenant {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
+  // Dompet Digital & Penarikan Saldo Tenant (Merchant Wallet)
+  walletBalance         Decimal          @default(0) @db.Decimal(14, 2)
+  bankName              String?
+  bankAccountNumber     String?
+  bankAccountName       String?
+
   users                 User[]
   outlets               Outlet[]
   menus                 MenuItem[]
@@ -95,6 +103,8 @@ model Tenant {
   factoryInvoices       FactoryInvoice[]
   fixedExpenses         FixedExpense[]
   subscriptionInvoices  SubscriptionInvoice[]
+  walletTransactions    WalletTransaction[]
+  withdrawals           WithdrawalRequest[]
 }
 
 model SubscriptionInvoice {
@@ -135,6 +145,7 @@ model Outlet {
   pettyCash        PettyCash[]
   factoryInvoices  FactoryInvoice[]
   fixedExpenses    FixedExpense[]
+  walletTransactions WalletTransaction[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -206,6 +217,9 @@ model Order {
   cashierId      String
   cashier        User          @relation("CashierOrders", fields: [cashierId], references: [id])
   status         OrderStatus   @default(PAID)
+  paymentGatewayRef String?
+  paymentUrl        String?
+  qrString          String?
   voidReason     String?
   voidedById     String?
   voidedBy       User?         @relation("VoidedOrders", fields: [voidedById], references: [id])
@@ -331,3 +345,46 @@ model FixedExpense {
 
   @@index([tenantId])
 }
+
+model WalletTransaction {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outletId       String?
+  outlet         Outlet?   @relation(fields: [outletId], references: [id])
+  type           String    // "CREDIT" (saldo masuk), "DEBIT" (saldo keluar)
+  category       String    // "POS_SALES", "WITHDRAWAL", "ADJUSTMENT", "REFUND"
+  amount         Decimal   @db.Decimal(14, 2)
+  balanceBefore  Decimal   @db.Decimal(14, 2)
+  balanceAfter   Decimal   @db.Decimal(14, 2)
+  referenceId    String?   // ID order / withdrawal / invoice
+  description    String
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+model WithdrawalRequest {
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  withdrawalNumber  String    @unique
+  amount            Decimal   @db.Decimal(14, 2)
+  fee               Decimal   @default(0) @db.Decimal(10, 2)
+  netAmount         Decimal   @db.Decimal(14, 2)
+  bankName          String
+  bankAccountNumber String
+  bankAccountName   String
+  status            String    @default("PENDING") // PENDING, PROCESSED, REJECTED
+  notes             String?
+  rejectionReason   String?
+  proofImageUrl     String?
+  processedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([createdAt])
+}
+

@@ -16,6 +16,8 @@ import * as publicController from '../controllers/publicController';
 import * as superadminController from '../controllers/superadminController';
 import * as billingController from '../controllers/billingController';
 import * as internalSyncController from '../controllers/internalSyncController';
+import * as walletController from '../controllers/walletController';
+import * as duitkuController from '../controllers/duitkuController';
 
 export const apiRouter = Router();
 
@@ -164,7 +166,73 @@ apiRouter.post(
 );
 apiRouter.post('/billing/webhook/midtrans', billingController.handleMidtransWebhook);
 
-// 14. Paket Lisensi & Integrasi ProtekSales (Inter-Service Communication)
+// 14. Duitku Payment Gateway (Subscription SaaS & POS QRIS Kasir)
+apiRouter.post(
+  '/payment/duitku/subscription-checkout',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  duitkuController.createSubscriptionCheckout
+);
+apiRouter.post(
+  '/payment/duitku/pos-qr',
+  authenticateJwt,
+  duitkuController.createPosQrPayment
+);
+apiRouter.post('/payment/duitku/callback', duitkuController.handleDuitkuCallback);
+apiRouter.get('/payment/duitku/status/:orderId', duitkuController.checkTransactionStatus);
+apiRouter.post(
+  '/payment/duitku/simulate/:orderId',
+  authenticateJwt,
+  duitkuController.simulateDuitkuPayment
+);
+
+// 15. Dompet Saldo & Penarikan Dana Tenant (Merchant Wallet & Payout)
+apiRouter.get(
+  '/wallet/summary',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  walletController.getWalletSummary
+);
+apiRouter.get(
+  '/wallet/transactions',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  walletController.getTransactions
+);
+apiRouter.get(
+  '/wallet/withdrawals',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  walletController.getWithdrawals
+);
+apiRouter.post(
+  '/wallet/withdraw',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  walletController.requestWithdrawal
+);
+apiRouter.put(
+  '/wallet/bank-account',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  walletController.updateBankAccount
+);
+
+// 16. Superadmin Withdrawal Auditing & Payouts
+apiRouter.get(
+  '/superadmin/withdrawals',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  walletController.getSuperadminWithdrawals
+);
+apiRouter.post(
+  '/superadmin/withdrawals/:id/process',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  walletController.processSuperadminWithdrawal
+);
+
+// 17. Paket Lisensi & Integrasi ProtekSales (Inter-Service Communication)
 apiRouter.get('/plans', internalSyncController.getAvailablePlans);
 apiRouter.post('/license/heartbeat', internalSyncController.checkHeartbeat);
 apiRouter.post(
