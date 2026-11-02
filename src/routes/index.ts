@@ -18,6 +18,7 @@ import * as billingController from '../controllers/billingController';
 import * as internalSyncController from '../controllers/internalSyncController';
 import * as walletController from '../controllers/walletController';
 import * as duitkuController from '../controllers/duitkuController';
+import * as paymentGatewayConfigController from '../controllers/paymentGatewayConfigController';
 
 export const apiRouter = Router();
 
@@ -184,6 +185,26 @@ apiRouter.post(
   '/payment/duitku/simulate/:orderId',
   authenticateJwt,
   duitkuController.simulateDuitkuPayment
+);
+
+// 14b. Konfigurasi Mandiri Payment Gateway Tenant (BYOK - Bring Your Own Keys)
+apiRouter.get(
+  '/payment/gateway/config',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  paymentGatewayConfigController.getPaymentGatewayConfig
+);
+apiRouter.put(
+  '/payment/gateway/config',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  paymentGatewayConfigController.updatePaymentGatewayConfig
+);
+apiRouter.post(
+  '/payment/gateway/test',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  paymentGatewayConfigController.testPaymentGatewayConfig
 );
 
 // 15. Dompet Saldo & Penarikan Dana Tenant (Merchant Wallet & Payout)

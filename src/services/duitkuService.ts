@@ -1,5 +1,13 @@
 import crypto from 'crypto';
 
+export interface DuitkuCredentials {
+  merchantCode: string;
+  apiKey: string;
+  isProduction?: boolean;
+  callbackUrl?: string;
+  returnUrl?: string;
+}
+
 export interface DuitkuInvoiceParams {
   merchantOrderId: string;
   amount: number;
@@ -39,33 +47,108 @@ export class DuitkuService {
     return (process.env.DUITKU_API_KEY || '').trim();
   }
 
-  private static getInquiryUrl(): string {
-    return this.isProduction()
+  private static getInquiryUrl(isProduction?: boolean): string {
+    const isProd = isProduction !== undefined ? isProduction : this.isProduction();
+    return isProd
       ? 'https://passport.duitku.com/webapi/api/merchant/v2/inquiry'
       : 'https://sandbox.duitku.com/webapi/api/merchant/v2/inquiry';
   }
 
-  private static getStatusUrl(): string {
-    return this.isProduction()
+  private static getStatusUrl(isProduction?: boolean): string {
+    const isProd = isProduction !== undefined ? isProduction : this.isProduction();
+    return isProd
       ? 'https://passport.duitku.com/webapi/api/merchant/transactionStatus'
       : 'https://sandbox.duitku.com/webapi/api/merchant/transactionStatus';
   }
 
   /**
-   * Buat Transaksi Pembayaran Duitku (Mendukung QRIS Dinamis, Virtual Account, & E-Wallet)
+   * Uji Kevalidan Kredensial Duitku (Merchant Code & API Key)
    */
-  public static async createTransaction(params: DuitkuInvoiceParams): Promise<DuitkuInvoiceResponse> {
-    const merchantCode = this.getMerchantCode();
-    const apiKey = this.getApiKey();
+  public static async testCredentials(creds: DuitkuCredentials): Promise<{ success: boolean; message: string }> {
+    const merchantCode = creds.merchantCode?.trim();
+    const apiKey = creds.apiKey?.trim();
+    const isProd = !!creds.isProduction;
+
+    if (!merchantCode || !apiKey) {
+      return { success: false, message: 'Merchant Code dan API Key Duitku wajib diisi' };
+    }
+
+    try {
+      const testOrderId = `TEST-${Date.now()}`;
+      const rawSignature = `${merchantCode}${testOrderId}${apiKey}`;
+      const signature = crypto.createHash('md5').update(rawSignature).digest('hex');
+
+      const payload = {
+        merchantCode,
+        merchantOrderId: testOrderId,
+        signature,
+      };
+
+      const res = await fetch(this.getStatusUrl(isProd), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data: any = await res.json().catch(() => ({}));
+
+      // Jika Duitku merespons dengan status code (misal 01 Transaction Not Found, atau 00),
+      // artinya signature dan kredensial diterima oleh Duitku!
+      // Jika signature atau Merchant Code salah, Duitku merespons "Bad Parameter" atau "Merchant not found"
+      if (
+        data.statusCode === '01' ||
+        data.statusCode === '00' ||
+        data.statusMessage?.toLowerCase().includes('not found') ||
+        data.statusMessage?.toLowerCase().includes('tidak ditemukan')
+      ) {
+        return {
+          success: true,
+          message: `Kredensial Duitku (${isProd ? 'Production' : 'Sandbox'}) Valid & Terverifikasi!`,
+        };
+      }
+
+      if (data.statusMessage?.toLowerCase().includes('merchant') || data.statusMessage?.toLowerCase().includes('signature')) {
+        return {
+          success: false,
+          message: `Duitku menolak kredensial: ${data.statusMessage || 'Merchant Code atau API Key tidak valid'}`,
+        };
+      }
+
+      return {
+        success: true,
+        message: `Koneksi ke gateway Duitku terhubung. Respon: ${data.statusMessage || 'OK'}`,
+      };
+    } catch (err: any) {
+      return { success: false, message: `Gagal menghubungi Duitku: ${err.message}` };
+    }
+  }
+
+  /**
+   * Buat Transaksi Pembayaran Duitku (Mendukung QRIS Dinamis, Virtual Account, & Kredensial Tenant Dinamis)
+   */
+  public static async createTransaction(
+    params: DuitkuInvoiceParams,
+    customCreds?: DuitkuCredentials
+  ): Promise<DuitkuInvoiceResponse> {
+    const merchantCode = customCreds?.merchantCode?.trim() || this.getMerchantCode();
+    const apiKey = customCreds?.apiKey?.trim() || this.getApiKey();
+    const isProd = customCreds !== undefined ? !!customCreds.isProduction : this.isProduction();
     const amount = Math.round(params.amount);
 
     // Default URLs
     const defaultCallback =
-      process.env.DUITKU_CALLBACK_URL || 'https://api.posmu.cloud/api/v1/payment/duitku/callback';
+      customCreds?.callbackUrl ||
+      process.env.DUITKU_CALLBACK_URL ||
+      'https://api.posmu.cloud/api/v1/payment/duitku/callback';
     const defaultReturn =
-      process.env.DUITKU_RETURN_URL || 'https://dimsum.posmu.cloud/billing';
+      customCreds?.returnUrl ||
+      process.env.DUITKU_RETURN_URL ||
+      'https://dimsum.posmu.cloud/billing';
 
-    // 1. Jika kredensial Duitku aktif di .env, tembak API resmi Duitku
+    // 1. Jika kredensial Duitku aktif, tembak API resmi Duitku
     if (merchantCode && apiKey && merchantCode.length > 2 && apiKey.length > 5) {
       try {
         // Rumus Signature Inquiry Duitku: MD5(merchantCode + merchantOrderId + paymentAmount + apiKey)
@@ -88,7 +171,7 @@ export class DuitkuService {
           additionalParam: params.additionalParam || '',
         };
 
-        const response = await fetch(this.getInquiryUrl(), {
+        const response = await fetch(this.getInquiryUrl(isProd), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -132,7 +215,7 @@ export class DuitkuService {
       qrString: simulatedQrCode,
       vaNumber: simulatedVaNumber,
       statusCode: '00',
-      statusMessage: 'Payment Gateway Duitku Siap. (Mode Simulator Aktif, isi DUITKU_API_KEY untuk live).',
+      statusMessage: 'Payment Gateway Duitku Siap. (Mode Simulator Aktif, isi Merchant Code & API Key untuk live).',
     };
   }
 
@@ -144,10 +227,12 @@ export class DuitkuService {
     merchantCodeParam: string,
     amountParam: string | number,
     merchantOrderIdParam: string,
-    signatureParam: string
+    signatureParam: string,
+    customApiKey?: string,
+    customMerchantCode?: string
   ): boolean {
-    const merchantCode = this.getMerchantCode();
-    const apiKey = this.getApiKey();
+    const merchantCode = customMerchantCode || this.getMerchantCode();
+    const apiKey = customApiKey || this.getApiKey();
 
     // Jika belum konfigurasi key, izinkan untuk testing simulator
     if (!apiKey || apiKey.length < 5) return true;
@@ -162,9 +247,13 @@ export class DuitkuService {
    * Cek Status Transaksi ke Duitku
    * Rumus Signature: MD5(merchantCode + merchantOrderId + apiKey)
    */
-  public static async checkTransactionStatus(merchantOrderId: string): Promise<any> {
-    const merchantCode = this.getMerchantCode();
-    const apiKey = this.getApiKey();
+  public static async checkTransactionStatus(
+    merchantOrderId: string,
+    customCreds?: DuitkuCredentials
+  ): Promise<any> {
+    const merchantCode = customCreds?.merchantCode?.trim() || this.getMerchantCode();
+    const apiKey = customCreds?.apiKey?.trim() || this.getApiKey();
+    const isProd = customCreds !== undefined ? !!customCreds.isProduction : this.isProduction();
 
     if (!merchantCode || !apiKey) {
       return {
@@ -183,7 +272,7 @@ export class DuitkuService {
         signature,
       };
 
-      const response = await fetch(this.getStatusUrl(), {
+      const response = await fetch(this.getStatusUrl(isProd), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

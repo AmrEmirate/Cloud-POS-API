@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth';
 import { basePrisma, prisma } from '../config/database';
 import { DuitkuService } from '../services/duitkuService';
+import { PaymentGatewayService } from '../services/paymentGateway';
 import { WalletService } from '../services/walletService';
 import { getPlanDetails } from '../config/plans';
 import { OrderStatus, PaymentMethod } from '@prisma/client';
@@ -116,13 +117,18 @@ export const createSubscriptionCheckout = async (req: AuthRequest, res: Response
 };
 
 /**
- * 2. Buat Transaksi POS Kasir (QRIS Dinamis Duitku)
+ * 2. Buat Transaksi POS Kasir (QRIS Dinamis Mandiri per Tenant / BYOK)
  */
 export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
   try {
     const tenantId = req.user?.tenantId;
     if (!tenantId) {
       return res.status(400).json({ success: false, message: 'Tenant tidak teridentifikasi' });
+    }
+
+    const tenant = await basePrisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
     const { orderId, invoiceNumber, amount, itemsDescription = 'Pesanan Kasir POS' } = req.body;
@@ -133,45 +139,139 @@ export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
     }
 
     const orderRef = invoiceNumber || `INV-POS/${Date.now()}`;
+    const activeProvider = (tenant.paymentGatewayProvider || 'NONE').toUpperCase();
 
-    // Request QRIS Duitku
-    const duitkuRes = await DuitkuService.createTransaction({
+    // 1. Jika Tenant mengaktifkan Midtrans (BYOK)
+    if (activeProvider === 'MIDTRANS' && tenant.midtransServerKey) {
+      const midtransRes = await PaymentGatewayService.createTransaction(
+        {
+          invoiceNumber: orderRef,
+          amount: numAmount,
+          description: `POS: ${itemsDescription}`.slice(0, 50),
+          customerName: req.user?.username || 'Pelanggan POS',
+        },
+        {
+          serverKey: tenant.midtransServerKey,
+          clientKey: tenant.midtransClientKey || undefined,
+          isProduction: tenant.midtransIsProduction,
+        }
+      );
+
+      if (orderId) {
+        await basePrisma.order
+          .update({
+            where: { id: String(orderId) },
+            data: {
+              paymentGatewayRef: midtransRes.snapToken || orderRef,
+              paymentUrl: midtransRes.redirectUrl || null,
+              qrString: midtransRes.qrCodeUrl || null,
+            },
+          })
+          .catch(() => null);
+      }
+
+      return res.json({
+        success: true,
+        message: 'Pembayaran Midtrans kasir berhasil dibuat',
+        data: {
+          merchantOrderId: orderRef,
+          amount: numAmount,
+          qrString: midtransRes.qrCodeUrl,
+          paymentUrl: midtransRes.redirectUrl,
+          reference: midtransRes.snapToken || orderRef,
+          gateway: 'MIDTRANS',
+          providerName: 'Midtrans Mandiri (Toko Anda)',
+        },
+      });
+    }
+
+    // 2. Jika Tenant mengaktifkan Duitku (BYOK)
+    if (activeProvider === 'DUITKU' && tenant.duitkuMerchantCode && tenant.duitkuApiKey) {
+      const duitkuRes = await DuitkuService.createTransaction(
+        {
+          merchantOrderId: orderRef,
+          amount: numAmount,
+          productDetails: `POS: ${itemsDescription}`.slice(0, 100),
+          customerName: req.user?.username || 'Pelanggan',
+          paymentMethod: 'NQ', // QRIS
+          expiryMinutes: 60,
+          additionalParam: JSON.stringify({ type: 'POS_ORDER', tenantId, orderId }),
+        },
+        {
+          merchantCode: tenant.duitkuMerchantCode,
+          apiKey: tenant.duitkuApiKey,
+          isProduction: tenant.duitkuIsProduction,
+        }
+      );
+
+      if (orderId) {
+        await basePrisma.order
+          .update({
+            where: { id: String(orderId) },
+            data: {
+              paymentGatewayRef: duitkuRes.reference,
+              paymentUrl: duitkuRes.paymentUrl,
+              qrString: duitkuRes.qrString,
+            },
+          })
+          .catch(() => null);
+      }
+
+      return res.json({
+        success: true,
+        message: 'QRIS Duitku kasir berhasil digenerate',
+        data: {
+          merchantOrderId: orderRef,
+          amount: numAmount,
+          qrString: duitkuRes.qrString,
+          paymentUrl: duitkuRes.paymentUrl,
+          reference: duitkuRes.reference,
+          gateway: duitkuRes.gateway,
+          providerName: 'Duitku Mandiri (Toko Anda)',
+        },
+      });
+    }
+
+    // 3. Fallback: Simulator QRIS / Platform Default
+    const fallbackRes = await DuitkuService.createTransaction({
       merchantOrderId: orderRef,
       amount: numAmount,
       productDetails: `POS: ${itemsDescription}`.slice(0, 100),
       customerName: req.user?.username || 'Pelanggan',
-      paymentMethod: 'NQ', // QRIS
-      expiryMinutes: 60, // 60 menit expired untuk kasir
+      paymentMethod: 'NQ',
+      expiryMinutes: 60,
       additionalParam: JSON.stringify({ type: 'POS_ORDER', tenantId, orderId }),
     });
 
-    // Jika orderId diberikan, update Order di DB
     if (orderId) {
-      await basePrisma.order.update({
-        where: { id: String(orderId) },
-        data: {
-          paymentGatewayRef: duitkuRes.reference,
-          paymentUrl: duitkuRes.paymentUrl,
-          qrString: duitkuRes.qrString,
-        },
-      }).catch(() => null);
+      await basePrisma.order
+        .update({
+          where: { id: String(orderId) },
+          data: {
+            paymentGatewayRef: fallbackRes.reference,
+            paymentUrl: fallbackRes.paymentUrl,
+            qrString: fallbackRes.qrString,
+          },
+        })
+        .catch(() => null);
     }
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'QRIS Duitku berhasil digenerate',
+      message: 'QRIS kasir digenerate (Mode Simulator / Demo Toko)',
       data: {
         merchantOrderId: orderRef,
         amount: numAmount,
-        qrString: duitkuRes.qrString,
-        paymentUrl: duitkuRes.paymentUrl,
-        reference: duitkuRes.reference,
-        gateway: duitkuRes.gateway,
+        qrString: fallbackRes.qrString,
+        paymentUrl: fallbackRes.paymentUrl,
+        reference: fallbackRes.reference,
+        gateway: fallbackRes.gateway,
+        providerName: 'Simulator (Hubungkan Gateway di Pengaturan)',
       },
     });
   } catch (error: any) {
     console.error('[Create POS Duitku QR Error]', error);
-    res.status(500).json({ success: false, message: error.message || 'Gagal membuat QRIS Duitku' });
+    res.status(500).json({ success: false, message: error.message || 'Gagal membuat QRIS kasir' });
   }
 };
 
@@ -198,20 +298,43 @@ export const handleDuitkuCallback = async (req: Request, res: Response) => {
       reference,
     });
 
-    // 1. Verifikasi Signature Keamanan Duitku
-    const isValid = DuitkuService.verifyCallback(
-      merchantCode,
-      amount,
-      merchantOrderId,
-      signature
-    );
+    // 1. Cek apakah ini Transaksi Langganan SaaS atau Pesanan POS
+    const isSubscription = String(merchantOrderId).startsWith('INV-SUB');
+    let orderRecord: any = null;
+
+    if (!isSubscription) {
+      orderRecord = await basePrisma.order.findUnique({
+        where: { invoiceNumber: String(merchantOrderId) },
+        include: { tenant: true },
+      });
+    }
+
+    // 2. Verifikasi Signature Keamanan Duitku
+    let isValid = false;
+    if (isSubscription) {
+      // Gunakan API key Platform
+      isValid = DuitkuService.verifyCallback(merchantCode, amount, merchantOrderId, signature);
+    } else if (orderRecord?.tenant?.duitkuApiKey) {
+      // Gunakan API key Mandiri milik Tenant (BYOK)
+      isValid = DuitkuService.verifyCallback(
+        merchantCode,
+        amount,
+        merchantOrderId,
+        signature,
+        orderRecord.tenant.duitkuApiKey,
+        orderRecord.tenant.duitkuMerchantCode || merchantCode
+      );
+    } else {
+      // Fallback ke API key platform / simulator
+      isValid = DuitkuService.verifyCallback(merchantCode, amount, merchantOrderId, signature);
+    }
 
     if (!isValid) {
       console.warn('[Duitku Webhook Warning] Signature Invalid for Order:', merchantOrderId);
       return res.status(400).send('BAD_SIGNATURE');
     }
 
-    // 2. Jika status bukan sukses ('00'), tanggapi Duitku agar tidak terus retry
+    // 3. Jika status bukan sukses ('00'), tanggapi Duitku agar tidak terus retry
     if (resultCode !== '00') {
       console.log(`[Duitku Callback] Order ${merchantOrderId} status is ${resultCode} (Not Paid)`);
       return res.status(200).send('SUCCESS');
@@ -220,7 +343,7 @@ export const handleDuitkuCallback = async (req: Request, res: Response) => {
     // ========================================================
     // KASUS A: Pembayaran Langganan SaaS (Subscription Invoice)
     // ========================================================
-    if (String(merchantOrderId).startsWith('INV-SUB')) {
+    if (isSubscription) {
       const invoice = await basePrisma.subscriptionInvoice.findUnique({
         where: { invoiceNumber: String(merchantOrderId) },
         include: { tenant: true },

@@ -94,6 +94,17 @@ model Tenant {
   bankAccountNumber     String?
   bankAccountName       String?
 
+  // Konfigurasi Payment Gateway Mandiri (BYOK - Bring Your Own Keys)
+  paymentGatewayProvider String?          @default("NONE") // "DUITKU" | "MIDTRANS" | "SIMULATOR" | "NONE"
+  duitkuMerchantCode     String?
+  duitkuApiKey           String?
+  duitkuIsProduction     Boolean          @default(false)
+  midtransServerKey      String?
+  midtransClientKey      String?
+  midtransMerchantId     String?
+  midtransIsProduction   Boolean          @default(false)
+  paymentGatewayEnabled  Boolean          @default(false)
+
   users                 User[]
   outlets               Outlet[]
   menus                 MenuItem[]

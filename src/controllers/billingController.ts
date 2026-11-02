@@ -2,7 +2,9 @@ import { Request, Response } from 'express';
 import { basePrisma, prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { PaymentGatewayService } from '../services/paymentGateway';
+import { WalletService } from '../services/walletService';
 import { getPlanDetails, SAAS_PLANS } from '../config/plans';
+import { OrderStatus, PaymentMethod } from '@prisma/client';
 
 export const getBillingStatus = async (req: AuthRequest, res: Response) => {
   try {
@@ -343,7 +345,64 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
   try {
     const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = req.body;
 
-    // Verifikasi Signature
+    const isSubscription = String(order_id).startsWith('INV-SUB');
+
+    // 1. Jika ini transaksi POS Order (Bukan Subscription)
+    if (!isSubscription) {
+      const order = await basePrisma.order.findUnique({
+        where: { invoiceNumber: String(order_id) },
+        include: { tenant: true },
+      });
+
+      if (order) {
+        // Re-verifikasi dengan Midtrans Server Key milik Tenant (BYOK)
+        const serverKey = order.tenant?.midtransServerKey || undefined;
+        const isTenantValid = PaymentGatewayService.verifyMidtransSignature(
+          order_id,
+          status_code,
+          gross_amount,
+          signature_key,
+          serverKey
+        );
+
+        if (!isTenantValid) {
+          console.warn('[Midtrans Webhook Warning] Invalid signature key for POS order:', order_id);
+          return res.status(403).json({ success: false, message: 'Invalid Signature' });
+        }
+
+        const isSettled =
+          transaction_status === 'settlement' ||
+          (transaction_status === 'capture' && fraud_status === 'accept');
+
+        if (isSettled && order.status !== OrderStatus.PAID) {
+          await basePrisma.order.update({
+            where: { id: order.id },
+            data: {
+              status: OrderStatus.PAID,
+              paymentMethod: PaymentMethod.QRIS,
+              paymentGatewayRef: req.body.transaction_id || order.paymentGatewayRef,
+            },
+          });
+
+          if (order.tenantId) {
+            await WalletService.creditBalance({
+              tenantId: order.tenantId,
+              outletId: order.outletId,
+              amount: Number(order.total),
+              category: 'POS_SALES',
+              referenceId: order.id,
+              description: `Omzet Midtrans Kasir (Direct Mandiri) - Nota ${order.invoiceNumber}`,
+            });
+          }
+          console.log(`[Midtrans POS Success] Order ${order.invoiceNumber} LUNAS via Midtrans BYOK!`);
+        }
+
+        return res.json({ success: true, message: 'POS order webhook processed' });
+      }
+    }
+
+    // 2. Transaksi Langganan SaaS (Subscription Invoice)
+    // Verifikasi Signature dengan Platform Midtrans Key
     const isValid = PaymentGatewayService.verifyMidtransSignature(
       order_id,
       status_code,
@@ -352,7 +411,7 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
     );
 
     if (!isValid) {
-      console.warn('[Midtrans Webhook Warning] Invalid signature key for order:', order_id);
+      console.warn('[Midtrans Webhook Warning] Invalid signature key for subscription order:', order_id);
       return res.status(403).json({ success: false, message: 'Invalid Signature' });
     }
 

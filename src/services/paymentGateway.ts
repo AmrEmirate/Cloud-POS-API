@@ -9,6 +9,12 @@ export interface PaymentGatewayInvoiceParams {
   customerPhone?: string;
 }
 
+export interface MidtransCredentials {
+  serverKey: string;
+  clientKey?: string;
+  isProduction?: boolean;
+}
+
 export interface PaymentGatewayResponse {
   success: boolean;
   gateway: 'MIDTRANS' | 'SIMULATOR';
@@ -33,11 +39,66 @@ export class PaymentGatewayService {
   }
 
   /**
-   * Create a Snap / Payment Gateway Transaction
+   * Test Kevalidan Server Key Midtrans
    */
-  public static async createTransaction(params: PaymentGatewayInvoiceParams): Promise<PaymentGatewayResponse> {
-    const serverKey = this.getServerKey();
-    const isProd = this.isProduction();
+  public static async testCredentials(creds: MidtransCredentials): Promise<{ success: boolean; message: string }> {
+    const serverKey = creds.serverKey?.trim();
+    if (!serverKey || serverKey.length < 5) {
+      return { success: false, message: 'Server Key Midtrans wajib diisi minimal 5 karakter' };
+    }
+
+    try {
+      const isProd = !!creds.isProduction;
+      const endpoint = isProd
+        ? 'https://app.midtrans.com/snap/v1/transactions'
+        : 'https://app.sandbox.midtrans.com/snap/v1/transactions';
+
+      const authHeader = 'Basic ' + Buffer.from(`${serverKey}:`).toString('base64');
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          transaction_details: {
+            order_id: `PING-TEST-${Date.now()}`,
+            gross_amount: 10000,
+          },
+        }),
+      });
+
+      if (res.status === 401) {
+        return { success: false, message: 'Midtrans Server Key tidak valid atau unauthorized (401)' };
+      }
+
+      const data: any = await res.json().catch(() => ({}));
+      if (res.ok || data.token || data.error_messages?.[0]?.includes('already') || res.status === 400) {
+        return {
+          success: true,
+          message: `Koneksi Midtrans (${isProd ? 'Production' : 'Sandbox'}) Terverifikasi Berhasil!`,
+        };
+      }
+
+      return {
+        success: false,
+        message: data.message || data.error_messages?.[0] || 'Midtrans mengembalikan respons gagal',
+      };
+    } catch (err: any) {
+      return { success: false, message: `Gagal menghubungi server Midtrans: ${err.message}` };
+    }
+  }
+
+  /**
+   * Create a Snap / Payment Gateway Transaction (Mendukung kredensial kustom per Tenant)
+   */
+  public static async createTransaction(
+    params: PaymentGatewayInvoiceParams,
+    customCreds?: MidtransCredentials
+  ): Promise<PaymentGatewayResponse> {
+    const serverKey = customCreds?.serverKey?.trim() || this.getServerKey();
+    const isProd = customCreds !== undefined ? !!customCreds.isProduction : this.isProduction();
 
     // 1. If Midtrans Server Key is configured, use official Midtrans Snap API
     if (serverKey && serverKey.length > 5) {
@@ -105,7 +166,7 @@ export class PaymentGatewayService {
       gateway: 'SIMULATOR',
       qrCodeUrl: simulatedQrCode,
       vaNumber: simulatedVaNumber,
-      message: 'Payment Gateway Siap. Untuk Live Midtrans, tambahkan MIDTRANS_SERVER_KEY di .env backend.',
+      message: 'Payment Gateway Siap. Untuk Live Midtrans, lengkapi Midtrans Server Key di menu Pengaturan Gateway.',
     };
   }
 
@@ -116,9 +177,10 @@ export class PaymentGatewayService {
     orderId: string,
     statusCode: string,
     grossAmount: string,
-    signatureKey: string
+    signatureKey: string,
+    customServerKey?: string
   ): boolean {
-    const serverKey = this.getServerKey();
+    const serverKey = customServerKey?.trim() || this.getServerKey();
     if (!serverKey) return true; // In dev/simulator mode
 
     const rawString = `${orderId}${statusCode}${grossAmount}${serverKey}`;
