@@ -43,3 +43,4 @@ export async function ensurePaymentGatewayColumns(): Promise<void> {
     console.warn('[Database Notice] ensurePaymentGatewayColumns standby:', err.message);
   }
 }
+
