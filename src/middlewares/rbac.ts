@@ -28,7 +28,7 @@ export const requireOutletAccess = (req: AuthRequest, res: Response, next: NextF
   }
 
   // Kasir is locked to their own outlet
-  const targetOutletId = req.params.outletId || req.body.outletId || req.query.outletId;
+  const targetOutletId = req.params?.outletId || req.body?.outletId || req.query?.outletId;
   if (targetOutletId && req.user.outletId && targetOutletId !== req.user.outletId) {
     return res.status(403).json({
       success: false,
