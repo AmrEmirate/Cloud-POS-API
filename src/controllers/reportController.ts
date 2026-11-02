@@ -5,15 +5,26 @@ import { OrderStatus, PettyCashStatus, ExpenseStatus } from '@prisma/client';
 
 export const getProfitLoss = async (req: AuthRequest, res: Response) => {
   try {
-    const { outletId } = req.query;
+    const { outletId, startDate, endDate } = req.query;
 
     const outletFilter = outletId && outletId !== 'all' ? { outletId: String(outletId) } : {};
+    const dateFilter: any = {};
+    if (startDate) {
+      dateFilter.gte = new Date(String(startDate));
+    }
+    if (endDate) {
+      const end = new Date(String(endDate));
+      end.setHours(23, 59, 59, 999);
+      dateFilter.lte = end;
+    }
+    const hasDate = Object.keys(dateFilter).length > 0;
 
     // 1. Sales & HPP from PAID orders
     const orders = await prisma.order.findMany({
       where: {
         ...outletFilter,
         status: OrderStatus.PAID,
+        ...(hasDate ? { createdAt: dateFilter } : {}),
       },
     });
 
@@ -27,6 +38,7 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
       where: {
         ...outletFilter,
         status: PettyCashStatus.DISETUJUI,
+        ...(hasDate ? { createdAt: dateFilter } : {}),
       },
     });
     const totalPettyCash = pettyCashRecords.reduce((sum, pc) => sum + Number(pc.amount), 0);
@@ -36,6 +48,7 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
       where: {
         ...(outletId && outletId !== 'all' ? { OR: [{ outletId: String(outletId) }, { outletId: null }] } : {}),
         status: ExpenseStatus.LUNAS,
+        ...(hasDate ? { dueDate: dateFilter } : {}),
       },
     });
     const totalFixedExpenses = fixedExpenses.reduce((sum, fe) => sum + Number(fe.amount), 0);
@@ -50,14 +63,22 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
     const outletBreakdowns = await Promise.all(
       outlets.map(async (o) => {
         const oOrders = await prisma.order.findMany({
-          where: { outletId: o.id, status: OrderStatus.PAID },
+          where: {
+            outletId: o.id,
+            status: OrderStatus.PAID,
+            ...(hasDate ? { createdAt: dateFilter } : {}),
+          },
         });
         const oSales = oOrders.reduce((s, ord) => s + Number(ord.total), 0);
         const oHpp = oOrders.reduce((s, ord) => s + Number(ord.hppTotal), 0);
         const oGross = oSales - oHpp;
 
         const oPc = await prisma.pettyCash.findMany({
-          where: { outletId: o.id, status: PettyCashStatus.DISETUJUI },
+          where: {
+            outletId: o.id,
+            status: PettyCashStatus.DISETUJUI,
+            ...(hasDate ? { createdAt: dateFilter } : {}),
+          },
         });
         const oPetty = oPc.reduce((s, p) => s + Number(p.amount), 0);
 

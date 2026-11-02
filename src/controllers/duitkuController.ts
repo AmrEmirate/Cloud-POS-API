@@ -416,17 +416,21 @@ export const handleDuitkuCallback = async (req: Request, res: Response) => {
         });
 
         // 2. Masukkan Dana ke Dompet Digital Tenant (CREDIT Mutation)
-        if (order.tenantId) {
+        // Hanya jika melalui Platform Escrow (Tenant belum mengaktifkan Gateway Mandiri BYOK)
+        const isUsingOwnGateway = order.tenant?.paymentGatewayEnabled && order.tenant?.paymentGatewayProvider && order.tenant.paymentGatewayProvider !== 'NONE';
+        if (order.tenantId && !isUsingOwnGateway) {
           await WalletService.creditBalance({
             tenantId: order.tenantId,
             outletId: order.outletId,
             amount: Number(order.total),
             category: 'POS_SALES',
             referenceId: order.id,
-            description: `Omzet QRIS Kasir (Duitku) - Nota ${order.invoiceNumber}`,
+            description: `Omzet QRIS Kasir (Platform Escrow) - Nota ${order.invoiceNumber}`,
           });
 
           console.log(`[Duitku Success] POS Order ${order.invoiceNumber} paid & credited to tenant wallet!`);
+        } else if (order.tenantId) {
+          console.log(`[Duitku Success] POS Order ${order.invoiceNumber} paid via Tenant Gateway (${order.tenant?.paymentGatewayProvider}) - Direct settlement to merchant account.`);
         }
       }
     }

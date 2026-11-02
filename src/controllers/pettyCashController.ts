@@ -86,11 +86,14 @@ export const createPettyCash = async (req: AuthRequest, res: Response) => {
 
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : (receiptImageUrl || 'https://images.unsplash.com/photo-1554415707-9e49017aed81?w=500&auto=format&fit=crop&q=80');
 
+    const targetTenantId = req.user?.tenantId || null;
+
     // Create record and update active shift in transaction
     const newRecord = await prisma.$transaction(async (tx) => {
       const rec = await tx.pettyCash.create({
         data: {
           expenseNumber,
+          tenantId: targetTenantId,
           outletId: targetOutletId,
           cashierId,
           amount: numAmount,
@@ -157,6 +160,10 @@ export const updatePettyCash = async (req: AuthRequest, res: Response) => {
     const existing = await prisma.pettyCash.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
     }
 
     if (existing.status !== PettyCashStatus.MENUNGGU_VERIFIKASI) {
@@ -235,10 +242,18 @@ export const updatePettyCash = async (req: AuthRequest, res: Response) => {
 };
 
 export const verifyPettyCash = async (req: AuthRequest, res: Response) => {
-
   try {
     const id = String(req.params.id);
     const { status } = req.body; // 'DISETUJUI' | 'DITOLAK'
+
+    const existing = await prisma.pettyCash.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
+    }
 
     const verifierId = req.user?.id || (await prisma.user.findFirst({ where: { role: 'SUPERVISOR' } }))?.id;
 
@@ -278,8 +293,20 @@ export const deletePettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'PIN Supervisor wajib disertakan' });
     }
 
+    const existing = await prisma.pettyCash.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
+    }
+
     const supervisors = await prisma.user.findMany({
-      where: { role: { in: ['OWNER', 'SUPERVISOR'] } },
+      where: {
+        role: { in: ['OWNER', 'SUPERVISOR'] },
+        ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
+      },
     });
 
     let authorized = false;
@@ -294,9 +321,25 @@ export const deletePettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, message: 'PIN Supervisor tidak valid!' });
     }
 
-    await prisma.pettyCash.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      // Reconcile active shift if within active shift
+      const activeShift = await tx.shiftSession.findFirst({
+        where: { outletId: existing.outletId, status: 'ACTIVE' },
+      });
+      if (activeShift) {
+        await tx.shiftSession.update({
+          where: { id: activeShift.id },
+          data: {
+            pettyCashOut: { decrement: Number(existing.amount) },
+            expectedCash: { increment: Number(existing.amount) },
+          },
+        });
+      }
 
-    res.json({ success: true, message: 'Nota kas kecil berhasil dihapus' });
+      await tx.pettyCash.delete({ where: { id } });
+    });
+
+    res.json({ success: true, message: 'Nota kas kecil berhasil dihapus dan laci shift direkonsiliasi' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message || 'Gagal menghapus kas kecil' });
   }

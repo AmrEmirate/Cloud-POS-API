@@ -57,29 +57,35 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     let targetOutletId = outletId;
     if (!targetOutletId || targetOutletId === 'all') {
       const firstOutlet = await prisma.outlet.findFirst();
-      targetOutletId = firstOutlet ? firstOutlet.id : 'du';
+      targetOutletId = firstOutlet ? firstOutlet.id : undefined;
     }
 
+    if (!targetOutletId) {
+      return res.status(400).json({ success: false, message: 'Outlet tidak valid atau belum terdaftar' });
+    }
+
+    const tenantId = req.user?.tenantId || null;
     const count = await prisma.factoryInvoice.count();
     const invoiceNumber = `INV-PBR-${new Date().toISOString().slice(0, 7)}-${String(count + 1).padStart(2, '0')}`;
 
     const created = await prisma.factoryInvoice.create({
       data: {
         invoiceNumber,
-        supplierName: supplierName || 'PT Dimsum Prima Rasa (Pusat)',
+        tenantId,
+        supplierName: supplierName || 'Supplier Utama Bahan Baku',
         outletId: targetOutletId,
         issueDate: new Date(issueDate || Date.now()),
         dueDate: new Date(dueDate || Date.now() + 10 * 24 * 60 * 60 * 1000),
-        totalAmount: totalAmount,
-        bankAccount: bankAccount || 'BCA 7788-990-112 a.n PT Dimsum Prima Rasa',
+        totalAmount: parseFloat(String(totalAmount)) || 0,
+        bankAccount: bankAccount || 'BCA 7788-990-112 a.n Supplier Bahan Baku',
         status: InvoiceStatus.BELUM_LUNAS,
         items: {
           create: (items || []).map((it: any) => ({
             itemName: it.itemName,
-            quantity: it.quantity,
+            quantity: Number(it.quantity) || 1,
             unit: it.unit || 'Pouch',
-            unitCost: it.unitCost,
-            total: it.total,
+            unitCost: parseFloat(String(it.unitCost)) || 0,
+            total: parseFloat(String(it.total)) || 0,
           })),
         },
       },
@@ -134,6 +140,15 @@ export const payInvoice = async (req: AuthRequest, res: Response) => {
     const id = String(req.params.id);
     const { proofImageUrl } = req.body;
 
+    const existing = await prisma.factoryInvoice.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
+    }
+
     const updated = await prisma.factoryInvoice.update({
       where: { id },
       data: {
@@ -163,7 +178,11 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
       include: { items: true },
     });
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Faktur tagihan pabrik tidak ditemukan' });
+      return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
     }
 
     let targetOutletId = outletId || existing.outletId;
@@ -244,7 +263,11 @@ export const deleteInvoice = async (req: AuthRequest, res: Response) => {
 
     const existing = await prisma.factoryInvoice.findUnique({ where: { id } });
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Faktur tagihan pabrik tidak ditemukan' });
+      return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
     }
 
     await prisma.factoryInvoice.delete({

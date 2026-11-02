@@ -222,6 +222,13 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (req.user?.role !== 'SUPERADMIN' && role === 'SUPERADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Hanya Superadmin platform yang berhak mendaftarkan akun Superadmin!',
+      });
+    }
+
     const cleanUsername = String(username).trim().toLowerCase();
 
     const existing = await basePrisma.user.findUnique({
@@ -290,6 +297,13 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     const user = await basePrisma.user.findUnique({ where: { id } });
     if (!user) {
       return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && user.tenantId && req.user?.tenantId && user.tenantId !== req.user.tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Akses ditolak: Pengguna bukan bagian dari organisasi/toko Anda',
+      });
     }
 
     if (user.role === 'SUPERADMIN') {

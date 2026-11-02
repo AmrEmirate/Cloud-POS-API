@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/database';
+import { AuthRequest } from '../middlewares/auth';
 
 export const getMenus = async (_req: Request, res: Response) => {
   try {
@@ -29,25 +30,33 @@ export const getMenus = async (_req: Request, res: Response) => {
   }
 };
 
-export const createMenu = async (req: Request, res: Response) => {
+export const createMenu = async (req: AuthRequest, res: Response) => {
   try {
     const { name, category, price, costPrice, stock, description, image } = req.body;
 
-    const prefix = category.substring(0, 3).toUpperCase();
-    const count = await prisma.menuItem.count({ where: { category } });
+    if (!name || price === undefined) {
+      return res.status(400).json({ success: false, message: 'Nama menu dan harga jual wajib diisi!' });
+    }
+
+    const cleanCategory = String(category || 'Umum').trim();
+    const prefix = cleanCategory.replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase() || 'MNU';
+    const count = await prisma.menuItem.count({ where: { category: cleanCategory } });
     const code = `${prefix}-${String(count + 1).padStart(3, '0')}`;
+
+    const tenantId = req.user?.role === 'SUPERADMIN' ? (req.body.tenantId || req.user?.tenantId || null) : (req.user?.tenantId || null);
 
     const newMenu = await prisma.menuItem.create({
       data: {
         code,
-        name,
-        category,
-        price,
-        costPrice,
-        stock: parseInt(stock, 10) || 0,
+        name: String(name).trim(),
+        category: cleanCategory,
+        price: parseFloat(String(price)) || 0,
+        costPrice: parseFloat(String(costPrice || 0)) || 0,
+        stock: parseInt(String(stock), 10) || 0,
         description: description || '',
         image: image || 'https://images.unsplash.com/photo-1498654896293-37aacf113fd9?w=500&auto=format&fit=crop&q=80',
         isAvailable: true,
+        tenantId,
       },
     });
 
@@ -65,19 +74,28 @@ export const createMenu = async (req: Request, res: Response) => {
   }
 };
 
-export const updateMenu = async (req: Request, res: Response) => {
+export const updateMenu = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
     const { name, category, price, costPrice, stock, description, image, isAvailable } = req.body;
 
+    const existing = await prisma.menuItem.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
+    }
+
     const updated = await prisma.menuItem.update({
       where: { id },
       data: {
-        ...(name && { name }),
-        ...(category && { category }),
-        ...(price !== undefined && { price }),
-        ...(costPrice !== undefined && { costPrice }),
-        ...(stock !== undefined && { stock: parseInt(stock, 10) }),
+        ...(name && { name: String(name).trim() }),
+        ...(category && { category: String(category).trim() }),
+        ...(price !== undefined && { price: parseFloat(String(price)) || 0 }),
+        ...(costPrice !== undefined && { costPrice: parseFloat(String(costPrice)) || 0 }),
+        ...(stock !== undefined && { stock: parseInt(String(stock), 10) }),
         ...(description !== undefined && { description }),
         ...(image !== undefined && { image }),
         ...(isAvailable !== undefined && { isAvailable }),
@@ -98,12 +116,16 @@ export const updateMenu = async (req: Request, res: Response) => {
   }
 };
 
-export const toggleAvailability = async (req: Request, res: Response) => {
+export const toggleAvailability = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
     const menu = await prisma.menuItem.findUnique({ where: { id } });
     if (!menu) {
       return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && menu.tenantId && req.user?.tenantId && menu.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
     }
 
     const updated = await prisma.menuItem.update({
@@ -125,9 +147,19 @@ export const toggleAvailability = async (req: Request, res: Response) => {
   }
 };
 
-export const deleteMenu = async (req: Request, res: Response) => {
+export const deleteMenu = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
+
+    const existing = await prisma.menuItem.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
+    }
+
     await prisma.menuItem.update({
       where: { id },
       data: { isDeleted: true },

@@ -46,12 +46,16 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     }
 
     // 4. Check Authorization Bearer token early if present
-    if (!resolvedSlug && !resolvedId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    let isSuperAdmin = false;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       try {
         const jwt = require('jsonwebtoken');
         const token = req.headers.authorization.split(' ')[1];
         const decoded = jwt.decode(token) as any;
-        if (decoded?.tenantId) {
+        if (decoded?.role === 'SUPERADMIN') {
+          isSuperAdmin = true;
+        }
+        if (decoded?.tenantId && !resolvedSlug && !resolvedId) {
           resolvedId = decoded.tenantId;
         }
       } catch (e) {
@@ -68,12 +72,12 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     }
 
     // 5. Fallback: if not resolved and not a superadmin route, fallback to default tenant 'dimsum-intan'
-    if (!tenant && !req.path.includes('/superadmin')) {
+    if (!tenant && !isSuperAdmin && !req.path.includes('/superadmin')) {
       tenant = await basePrisma.tenant.findUnique({ where: { slug: 'dimsum-intan' } });
     }
 
     if (tenant) {
-      if (tenant.status === 'SUSPENDED' && !req.path.includes('/superadmin') && !req.path.includes('/public')) {
+      if (tenant.status === 'SUSPENDED' && !isSuperAdmin && !req.path.includes('/superadmin') && !req.path.includes('/public')) {
         return res.status(403).json({
           success: false,
           message: 'Akun bisnis (tenant) ini sedang dinonaktifkan/disuspensi. Silakan hubungi platform admin.',
@@ -85,7 +89,8 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     }
 
     // Run downstream request in tenant storage
-    tenantStorage.run({ tenantId: req.tenantId }, () => {
+    const effectiveTenantId = isSuperAdmin ? (req.headers['x-tenant-id'] as string || undefined) : req.tenantId;
+    tenantStorage.run({ tenantId: effectiveTenantId, isSuperAdmin: isSuperAdmin && !effectiveTenantId }, () => {
       next();
     });
   } catch (err) {

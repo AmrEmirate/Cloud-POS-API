@@ -190,6 +190,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const ord = await tx.order.create({
         data: {
           invoiceNumber,
+          tenantId: tenantId || null,
           outletId: targetOutletId,
           orderType: orderType === 'dine-in' ? OrderType.DINE_IN : OrderType.TAKEAWAY,
           tableNumber: tableNumber || null,
@@ -265,18 +266,29 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       return ord;
     });
 
-    // 4. Jika pembayaran menggunakan DUITKU_QRIS, otomatis tambahkan saldo ke dompet tenant
+    // 4. Jika pembayaran menggunakan DUITKU_QRIS via Escrow Platform (bukan Gateway Mandiri BYOK),
+    // otomatis tambahkan saldo ke dompet tenant. Jika BYOK aktif, dana QRIS otomatis langsung ke akun Midtrans/Duitku milik tenant.
     if (targetPaymentMethod === PaymentMethod.DUITKU_QRIS && tenantId) {
-      await WalletService.creditBalance({
-        tenantId,
-        outletId: targetOutletId,
-        amount: total,
-        category: 'POS_SALES',
-        referenceId: createdOrder.id,
-        description: `Penjualan Kasir POS (Duitku QRIS) - Nota ${createdOrder.invoiceNumber}`,
-      }).catch((err) => {
-        console.error('Gagal mencatat mutasi dompet kasir Duitku:', err);
-      });
+      const isUsingOwnGateway = req.user?.role !== 'SUPERADMIN' && !!(await basePrisma.tenant.findFirst({
+        where: {
+          id: tenantId,
+          paymentGatewayEnabled: true,
+          paymentGatewayProvider: { in: ['DUITKU', 'MIDTRANS'] },
+        },
+      }));
+
+      if (!isUsingOwnGateway) {
+        await WalletService.creditBalance({
+          tenantId,
+          outletId: targetOutletId,
+          amount: total,
+          category: 'POS_SALES',
+          referenceId: createdOrder.id,
+          description: `Penjualan Kasir POS (Duitku Escrow) - Nota ${createdOrder.invoiceNumber}`,
+        }).catch((err) => {
+          console.error('Gagal mencatat mutasi dompet kasir Duitku:', err);
+        });
+      }
     }
 
     res.status(201).json({
@@ -355,6 +367,10 @@ export const voidOrder = async (req: AuthRequest, res: Response) => {
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && order.tenantId && req.user?.tenantId && order.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Pesanan bukan milik outlet/toko Anda' });
     }
 
     if (order.status === OrderStatus.VOIDED) {

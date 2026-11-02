@@ -48,21 +48,25 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
   try {
     const { title, category, outletId, amount, period, dueDate, autoDebet } = req.body;
 
-    const prefix = category.substring(0, 3).toUpperCase();
+    const cleanCategory = String(category || 'OPX').trim();
+    const prefix = cleanCategory.replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase() || 'OPX';
     const count = await prisma.fixedExpense.count();
     const code = `OPX-${prefix}-${String(count + 1).padStart(3, '0')}`;
+
+    const tenantId = req.user?.tenantId || null;
 
     const created = await prisma.fixedExpense.create({
       data: {
         code,
-        title,
-        category: category as FixedExpenseCategory,
+        title: String(title || 'Beban Operasional').trim(),
+        category: cleanCategory as FixedExpenseCategory,
         outletId: (!outletId || outletId === 'all') ? null : outletId,
-        amount,
+        amount: parseFloat(String(amount)) || 0,
         period: period || 'Bulan Ini',
         dueDate: new Date(dueDate || Date.now()),
         autoDebet: Boolean(autoDebet),
         status: ExpenseStatus.TERJADWAL,
+        tenantId,
       },
       include: {
         outlet: { select: { name: true } },
@@ -89,6 +93,10 @@ export const toggleExpenseStatus = async (req: AuthRequest, res: Response) => {
     const exp = await prisma.fixedExpense.findUnique({ where: { id } });
     if (!exp) {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && exp.tenantId && req.user?.tenantId && exp.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
     }
 
     const newStatus = exp.status === ExpenseStatus.LUNAS ? ExpenseStatus.TERJADWAL : ExpenseStatus.LUNAS;
@@ -122,13 +130,17 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
     }
 
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
+    }
+
     const updated = await prisma.fixedExpense.update({
       where: { id },
       data: {
-        ...(title && { title }),
-        ...(category && { category: category as FixedExpenseCategory }),
+        ...(title && { title: String(title).trim() }),
+        ...(category && { category: String(category).trim() as FixedExpenseCategory }),
         ...(outletId !== undefined && { outletId: (!outletId || outletId === 'all') ? null : outletId }),
-        ...(amount !== undefined && { amount: parseFloat(amount) }),
+        ...(amount !== undefined && { amount: parseFloat(String(amount)) || 0 }),
         ...(period && { period }),
         ...(dueDate && { dueDate: new Date(dueDate) }),
         ...(autoDebet !== undefined && { autoDebet: Boolean(autoDebet) }),
@@ -157,6 +169,10 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
     const existing = await prisma.fixedExpense.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
     }
 
     await prisma.fixedExpense.delete({ where: { id } });

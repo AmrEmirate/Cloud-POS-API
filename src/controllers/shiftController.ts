@@ -93,6 +93,7 @@ export const openShift = async (req: AuthRequest, res: Response) => {
     const newShift = await prisma.shiftSession.create({
       data: {
         shiftName,
+        tenantId: req.user?.tenantId || null,
         outletId: targetOutletId,
         cashierId,
         terminalId: 'POS-01 Terminal',
@@ -137,10 +138,18 @@ export const openShift = async (req: AuthRequest, res: Response) => {
 
 export const closeShift = async (req: AuthRequest, res: Response) => {
   try {
-    const { actualEndingCash, notes } = req.body;
+    const { actualEndingCash, notes, outletId, shiftId } = req.body;
+
+    const targetOutletId = outletId || req.user?.outletId;
+    const whereClause: any = { status: ShiftStatus.ACTIVE };
+    if (shiftId) {
+      whereClause.id = String(shiftId);
+    } else if (targetOutletId && targetOutletId !== 'all') {
+      whereClause.outletId = String(targetOutletId);
+    }
 
     const activeShift = await prisma.shiftSession.findFirst({
-      where: { status: ShiftStatus.ACTIVE },
+      where: whereClause,
       include: {
         outlet: { select: { name: true } },
         cashier: { select: { name: true } },

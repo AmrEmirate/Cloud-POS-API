@@ -74,6 +74,7 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
         address: String(address).trim(),
         phone: String(phone).trim(),
         targetDailySales: parseFloat(String(targetDailySales)) || 0,
+        tenantId: tenantId || null,
       },
     });
 
@@ -112,6 +113,13 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({
         success: false,
         message: 'Outlet cabang tidak ditemukan!',
+      });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Akses ditolak: Cabang bukan milik organisasi Anda!',
       });
     }
 
@@ -169,6 +177,24 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
 export const deleteOutlet = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
+
+    const existing = await prisma.outlet.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Outlet cabang tidak ditemukan!',
+      });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Akses ditolak: Cabang bukan milik organisasi Anda!',
+      });
+    }
 
     // Check relations
     const [orderCount, shiftCount, pcCount, invCount, expCount] = await Promise.all([

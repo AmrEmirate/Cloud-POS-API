@@ -384,17 +384,20 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
             },
           });
 
-          if (order.tenantId) {
+          // Dana disalurkan langsung ke rekening Midtrans milik Tenant (BYOK).
+          // Wallet Platform hanya dikreditkan jika tenant menggunakan Escrow Platform.
+          const isUsingOwnGateway = order.tenant?.paymentGatewayEnabled && order.tenant?.paymentGatewayProvider && order.tenant.paymentGatewayProvider !== 'NONE';
+          if (order.tenantId && !isUsingOwnGateway) {
             await WalletService.creditBalance({
               tenantId: order.tenantId,
               outletId: order.outletId,
               amount: Number(order.total),
               category: 'POS_SALES',
               referenceId: order.id,
-              description: `Omzet Midtrans Kasir (Direct Mandiri) - Nota ${order.invoiceNumber}`,
+              description: `Omzet Midtrans Kasir (Platform Escrow) - Nota ${order.invoiceNumber}`,
             });
           }
-          console.log(`[Midtrans POS Success] Order ${order.invoiceNumber} LUNAS via Midtrans BYOK!`);
+          console.log(`[Midtrans POS Success] Order ${order.invoiceNumber} LUNAS via Midtrans (BYOK: ${Boolean(isUsingOwnGateway)})!`);
         }
 
         return res.json({ success: true, message: 'POS order webhook processed' });
