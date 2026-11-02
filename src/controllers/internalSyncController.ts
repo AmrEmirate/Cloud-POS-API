@@ -54,7 +54,7 @@ export const syncLicenseStatus = async (req: Request, res: Response) => {
  */
 export const provisionTenant = async (req: Request, res: Response) => {
   try {
-    const { name, ownerName, phone, planCode, licenseKey, customDomain, themeColor } = req.body;
+    const { name, ownerName, phone, planCode, licenseKey, customDomain, themeColor, themeConfig } = req.body;
 
     if (!name || !ownerName || !phone || !licenseKey) {
       return res.status(400).json({
@@ -71,6 +71,7 @@ export const provisionTenant = async (req: Request, res: Response) => {
       licenseKey,
       customDomain,
       themeColor,
+      themeConfig,
     });
 
     res.status(201).json({

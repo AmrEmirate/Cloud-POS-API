@@ -39,6 +39,7 @@ export interface ProvisionFromProtekInput {
   licenseKey: string;
   customDomain?: string;
   themeColor?: string;
+  themeConfig?: any;
   initialOutletName?: string;
   ownerUsername?: string;
   ownerPassword?: string;
@@ -156,6 +157,7 @@ export class ProtekIntegrationService {
           subscriptionExpiresAt,
           licenseKey: input.licenseKey,
           themeColor: input.themeColor || '#f97316',
+          themeConfig: input.themeConfig || null,
           customDomain: input.customDomain || null,
         },
       });
