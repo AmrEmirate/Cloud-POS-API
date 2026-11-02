@@ -38,7 +38,7 @@ export const createMenu = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'Nama menu dan harga jual wajib diisi!' });
     }
 
-    const cleanCategory = String(category || 'Umum').trim();
+    const cleanCategory = String(category || '').trim() || 'Umum';
     const prefix = cleanCategory.replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase() || 'MNU';
     const count = await prisma.menuItem.count({ where: { category: cleanCategory } });
     const code = `${prefix}-${String(count + 1).padStart(3, '0')}`;
