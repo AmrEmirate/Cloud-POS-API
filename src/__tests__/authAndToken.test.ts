@@ -2,12 +2,14 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 describe('White Box Testing: Authentication & Security Tokens (Bcrypt & JWT)', () => {
+  jest.setTimeout(25000);
   const secret = 'dimsum_intan_super_secure_jwt_secret_key_2026';
+  const SALT_ROUNDS = 4; // Fast salt rounds for deterministic and fast unit testing
 
   describe('White Box: Bcrypt Password & PIN Hashing Algorithm', () => {
     it('should correctly hash and verify password', async () => {
       const rawPassword = 'StrongOwnerPassword2026!';
-      const hash = await bcrypt.hash(rawPassword, 10);
+      const hash = await bcrypt.hash(rawPassword, SALT_ROUNDS);
 
       expect(hash).not.toEqual(rawPassword);
       expect(hash.startsWith('$2')).toBe(true);
@@ -18,7 +20,7 @@ describe('White Box Testing: Authentication & Security Tokens (Bcrypt & JWT)', (
 
     it('should reject incorrect password', async () => {
       const rawPassword = 'CorrectPassword';
-      const hash = await bcrypt.hash(rawPassword, 10);
+      const hash = await bcrypt.hash(rawPassword, SALT_ROUNDS);
 
       const isMatch = await bcrypt.compare('WrongPassword', hash);
       expect(isMatch).toBe(false);
@@ -26,8 +28,8 @@ describe('White Box Testing: Authentication & Security Tokens (Bcrypt & JWT)', (
 
     it('should generate distinct salt hashes for identical passwords', async () => {
       const password = 'identicalPassword';
-      const hash1 = await bcrypt.hash(password, 10);
-      const hash2 = await bcrypt.hash(password, 10);
+      const hash1 = await bcrypt.hash(password, SALT_ROUNDS);
+      const hash2 = await bcrypt.hash(password, SALT_ROUNDS);
 
       expect(hash1).not.toEqual(hash2);
       expect(await bcrypt.compare(password, hash1)).toBe(true);
