@@ -49,7 +49,7 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
       paymentMethod: o.paymentMethod,
       cashReceived: o.cashReceived ? Number(o.cashReceived) : undefined,
       changeAmount: o.changeAmount ? Number(o.changeAmount) : undefined,
-      cashierName: o.cashier.name,
+      cashierName: o.cashier?.name || 'Kasir',
       status: o.status,
       voidReason: o.voidReason || undefined,
       voidAuthorizedBy: o.voidedBy ? o.voidedBy.name : undefined,
@@ -102,8 +102,20 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'Outlet tidak valid' });
     }
 
-    const outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
-    const outletCode = outlet ? outlet.code.replace('-', '') : 'DU01';
+    let outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
+    if (!outlet) {
+      const fallbackOutlet = await prisma.outlet.findFirst();
+      if (fallbackOutlet) {
+        targetOutletId = fallbackOutlet.id;
+        outlet = fallbackOutlet;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada cabang (outlet) yang terdaftar. Harap tambahkan cabang terlebih dahulu di menu Outlet.',
+        });
+      }
+    }
+    const outletCode = outlet.code ? outlet.code.replace('-', '') : 'DU01';
 
     // Generate Invoice Number
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -317,7 +329,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         paymentMethod: createdOrder.paymentMethod,
         cashReceived: createdOrder.cashReceived ? Number(createdOrder.cashReceived) : undefined,
         changeAmount: createdOrder.changeAmount ? Number(createdOrder.changeAmount) : undefined,
-        cashierName: createdOrder.cashier.name,
+        cashierName: createdOrder.cashier?.name || 'Kasir',
         status: createdOrder.status,
         createdAt: createdOrder.createdAt.toISOString(),
       },

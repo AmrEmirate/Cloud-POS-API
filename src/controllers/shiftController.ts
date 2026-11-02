@@ -31,9 +31,9 @@ export const getCurrentShift = async (req: AuthRequest, res: Response) => {
         id: shift.id,
         shiftName: shift.shiftName,
         outletId: shift.outletId,
-        outletName: shift.outlet.name,
+        outletName: shift.outlet?.name || 'Outlet',
         cashierId: shift.cashierId,
-        cashierName: shift.cashier.name,
+        cashierName: shift.cashier?.name || 'Kasir',
         terminalId: shift.terminalId,
         startTime: shift.startTime.toISOString(),
         endTime: shift.endTime ? shift.endTime.toISOString() : undefined,
@@ -68,6 +68,19 @@ export const openShift = async (req: AuthRequest, res: Response) => {
     }
     if (!targetOutletId) {
       return res.status(400).json({ success: false, message: 'Outlet tidak valid' });
+    }
+
+    let outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
+    if (!outlet) {
+      const fallbackOutlet = await prisma.outlet.findFirst();
+      if (fallbackOutlet) {
+        targetOutletId = fallbackOutlet.id;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada cabang (outlet) yang terdaftar. Harap tambahkan cabang terlebih dahulu di menu Outlet.',
+        });
+      }
     }
 
     const cashierId = req.user?.id;
@@ -117,9 +130,9 @@ export const openShift = async (req: AuthRequest, res: Response) => {
         id: newShift.id,
         shiftName: newShift.shiftName,
         outletId: newShift.outletId,
-        outletName: newShift.outlet.name,
+        outletName: newShift.outlet?.name || 'Outlet',
         cashierId: newShift.cashierId,
-        cashierName: newShift.cashier.name,
+        cashierName: newShift.cashier?.name || 'Kasir',
         terminalId: newShift.terminalId,
         startTime: newShift.startTime.toISOString(),
         startingCash: Number(newShift.startingCash),
@@ -187,9 +200,9 @@ export const closeShift = async (req: AuthRequest, res: Response) => {
         id: closed.id,
         shiftName: closed.shiftName,
         outletId: closed.outletId,
-        outletName: closed.outlet.name,
+        outletName: closed.outlet?.name || 'Outlet',
         cashierId: closed.cashierId,
-        cashierName: closed.cashier.name,
+        cashierName: closed.cashier?.name || 'Kasir',
         terminalId: closed.terminalId,
         startTime: closed.startTime.toISOString(),
         endTime: closed.endTime?.toISOString(),
@@ -233,9 +246,9 @@ export const getShiftHistory = async (req: AuthRequest, res: Response) => {
       id: s.id,
       shiftName: s.shiftName,
       outletId: s.outletId,
-      outletName: s.outlet.name,
+      outletName: s.outlet?.name || 'Outlet',
       cashierId: s.cashierId,
-      cashierName: s.cashier.name,
+      cashierName: s.cashier?.name || 'Kasir',
       terminalId: s.terminalId,
       startTime: s.startTime.toISOString(),
       endTime: s.endTime ? s.endTime.toISOString() : undefined,

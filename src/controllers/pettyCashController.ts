@@ -28,7 +28,7 @@ export const getPettyCash = async (req: AuthRequest, res: Response) => {
       expenseNumber: pc.expenseNumber,
       outletId: pc.outletId,
       outletName: pc.outlet?.name || 'Outlet',
-      cashierName: pc.cashier.name,
+      cashierName: pc.cashier?.name || 'Kasir',
       amount: Number(pc.amount),
       category: pc.category,
       description: pc.description,
@@ -76,8 +76,20 @@ export const createPettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, message: 'Kasir tidak teridentifikasi. Harap login kembali.' });
     }
 
-    const outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
-    const outletCode = outlet ? outlet.code.replace('-', '') : 'DU01';
+    let outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
+    if (!outlet) {
+      const fallbackOutlet = await prisma.outlet.findFirst();
+      if (fallbackOutlet) {
+        targetOutletId = fallbackOutlet.id;
+        outlet = fallbackOutlet;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada cabang (outlet) yang terdaftar. Harap tambahkan cabang terlebih dahulu di menu Outlet.',
+        });
+      }
+    }
+    const outletCode = outlet.code ? outlet.code.replace('-', '') : 'DU01';
 
     const now = new Date();
     const ymStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}`;

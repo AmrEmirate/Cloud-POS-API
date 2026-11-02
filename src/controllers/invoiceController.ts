@@ -60,8 +60,18 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       targetOutletId = firstOutlet ? firstOutlet.id : undefined;
     }
 
-    if (!targetOutletId) {
-      return res.status(400).json({ success: false, message: 'Outlet tidak valid atau belum terdaftar' });
+    let outlet = await prisma.outlet.findUnique({ where: { id: targetOutletId } });
+    if (!outlet) {
+      const fallbackOutlet = await prisma.outlet.findFirst();
+      if (fallbackOutlet) {
+        targetOutletId = fallbackOutlet.id;
+        outlet = fallbackOutlet;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada cabang (outlet) yang terdaftar. Harap tambahkan cabang terlebih dahulu di menu Outlet.',
+        });
+      }
     }
 
     const tenantId = req.user?.tenantId || null;
