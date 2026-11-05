@@ -150,6 +150,8 @@ model Outlet {
   address          String
   phone            String
   targetDailySales Decimal           @db.Decimal(12, 2)
+  plan             String            @default("PAKET_100K")
+  dailyTxLimit     Int               @default(200)
   users            User[]
   orders           Order[]
   shifts           ShiftSession[]

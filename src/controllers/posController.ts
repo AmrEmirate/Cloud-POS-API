@@ -154,13 +154,29 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // 2. Cek kuota transaksi bulanan (murni per bulan)
+        // 2. Cek kuota transaksi bulanan (murni per bulan & per cabang)
         // monthlyTxLimit === 0 menandakan paket UNLIMITED
-        const planConfig = getPlanDetails(tenant.plan);
+        let outletPlan = tenant.plan;
+        let outletDaily = tenant.dailyTxLimitPerOutlet;
+
+        if (targetOutletId) {
+          const outletData = await prisma.outlet.findUnique({
+            where: { id: targetOutletId },
+            select: { plan: true, dailyTxLimit: true },
+          });
+          if (outletData?.plan) {
+            outletPlan = outletData.plan;
+          }
+          if (outletData?.dailyTxLimit !== undefined && outletData?.dailyTxLimit !== null) {
+            outletDaily = outletData.dailyTxLimit;
+          }
+        }
+
+        const planConfig = getPlanDetails(outletPlan);
         const baseMonthlyLimit = planConfig.monthlyTxLimit > 0
           ? planConfig.monthlyTxLimit
-          : (tenant.dailyTxLimitPerOutlet ? tenant.dailyTxLimitPerOutlet * 30 : 6000);
-        const isUnlimited = planConfig.monthlyTxLimit === 0 || tenant.dailyTxLimitPerOutlet === 0;
+          : (outletDaily ? outletDaily * 30 : 6000);
+        const isUnlimited = planConfig.monthlyTxLimit === 0 || outletDaily === 0;
 
         if (!isUnlimited) {
           const extraMonthly = (tenant.extraDailyTxLimit || 0) * 30;

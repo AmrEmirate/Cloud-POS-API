@@ -393,6 +393,16 @@ export const handleDuitkuCallback = async (req: Request, res: Response) => {
             updateData.pricePerOutlet = planInfo.price;
             updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
             updateData.status = 'ACTIVE';
+
+            if (metadata.targetOutletId) {
+              await basePrisma.outlet.update({
+                where: { id: String(metadata.targetOutletId) },
+                data: {
+                  plan: planInfo.code,
+                  dailyTxLimit: planInfo.dailyTxLimit,
+                },
+              }).catch((err) => console.warn('[Duitku Outlet Plan Update Warning]', err));
+            }
           }
         }
 

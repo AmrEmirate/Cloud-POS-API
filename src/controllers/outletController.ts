@@ -1,22 +1,53 @@
 import { Request, Response } from 'express';
 import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
+import { getPlanDetails } from '../config/plans';
 
 export const getOutlets = async (_req: Request, res: Response) => {
   try {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
     const outlets = await prisma.outlet.findMany({
       orderBy: { code: 'asc' },
+      include: {
+        _count: {
+          select: {
+            orders: {
+              where: { createdAt: { gte: startOfMonth } },
+            },
+          },
+        },
+      },
     });
 
-    const formatted = outlets.map((o) => ({
-      id: o.id,
-      code: o.code,
-      name: o.name,
-      city: o.city,
-      address: o.address,
-      phone: o.phone,
-      targetDailySales: Number(o.targetDailySales),
-    }));
+    const formatted = outlets.map((o) => {
+      const planInfo = getPlanDetails((o as any).plan || 'PAKET_100K');
+      const outletDailyLimit = (o as any).dailyTxLimit !== undefined && (o as any).dailyTxLimit !== null
+        ? (o as any).dailyTxLimit
+        : planInfo.dailyTxLimit;
+      const isUnlimited = planInfo.monthlyTxLimit === 0 || outletDailyLimit === 0;
+      const monthlyTxLimit = isUnlimited
+        ? 0
+        : (planInfo.monthlyTxLimit > 0 ? planInfo.monthlyTxLimit : outletDailyLimit * 30);
+
+      return {
+        id: o.id,
+        code: o.code,
+        name: o.name,
+        city: o.city,
+        address: o.address,
+        phone: o.phone,
+        targetDailySales: Number(o.targetDailySales),
+        plan: (o as any).plan || planInfo.code,
+        planName: planInfo.name,
+        dailyTxLimit: outletDailyLimit,
+        monthlyTxLimit,
+        isUnlimited,
+        currentMonthTxCount: o._count?.orders ?? 0,
+      };
+    });
 
     res.json({ success: true, data: formatted });
   } catch (error: any) {
@@ -27,7 +58,7 @@ export const getOutlets = async (_req: Request, res: Response) => {
 
 export const createOutlet = async (req: AuthRequest, res: Response) => {
   try {
-    const { code, name, city = 'Bandung', address, phone, targetDailySales = 4000000 } = req.body;
+    const { code, name, city = 'Bandung', address, phone, targetDailySales = 4000000, plan } = req.body;
 
     if (!code || !name || !address || !phone) {
       return res.status(400).json({
@@ -37,18 +68,23 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
     }
 
     const tenantId = req.user?.tenantId;
+    let tenantPlan = 'PAKET_100K';
+
     if (tenantId && req.user?.role !== 'SUPERADMIN') {
       const tenant = await basePrisma.tenant.findUnique({
         where: { id: tenantId },
         include: { outlets: { select: { id: true } } },
       });
 
-      if (tenant && tenant.outlets.length >= tenant.maxOutlets) {
-        return res.status(402).json({
-          success: false,
-          code: 'OUTLET_LIMIT_REACHED',
-          message: `Batas kuota cabang telah tercapai (${tenant.outlets.length}/${tenant.maxOutlets} cabang). Harap lakukan pembayaran tambah outlet seharga Rp ${Number(tenant.pricePerOutlet).toLocaleString('id-ID')}/bulan terlebih dahulu!`,
-        });
+      if (tenant) {
+        tenantPlan = tenant.plan || 'PAKET_100K';
+        if (tenant.outlets.length >= tenant.maxOutlets) {
+          return res.status(402).json({
+            success: false,
+            code: 'OUTLET_LIMIT_REACHED',
+            message: `Batas kuota cabang telah tercapai (${tenant.outlets.length}/${tenant.maxOutlets} cabang). Harap lakukan pembayaran tambah outlet seharga Rp ${Number(tenant.pricePerOutlet).toLocaleString('id-ID')}/bulan terlebih dahulu!`,
+          });
+        }
       }
     }
 
@@ -66,6 +102,10 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Resolve plan configuration for this specific outlet
+    const selectedPlanCode = plan || tenantPlan;
+    const planInfo = getPlanDetails(selectedPlanCode);
+
     const newOutlet = await prisma.outlet.create({
       data: {
         code: cleanCode,
@@ -75,12 +115,14 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
         phone: String(phone).trim(),
         targetDailySales: parseFloat(String(targetDailySales)) || 0,
         tenantId: tenantId || null,
+        plan: planInfo.code,
+        dailyTxLimit: planInfo.dailyTxLimit,
       },
     });
 
     res.status(201).json({
       success: true,
-      message: `Cabang baru "${newOutlet.name}" (${newOutlet.code}) berhasil ditambahkan!`,
+      message: `Cabang baru "${newOutlet.name}" (${newOutlet.code}) berhasil ditambahkan dengan ${planInfo.name}!`,
       data: {
         id: newOutlet.id,
         code: newOutlet.code,
@@ -89,6 +131,12 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
         address: newOutlet.address,
         phone: newOutlet.phone,
         targetDailySales: Number(newOutlet.targetDailySales),
+        plan: newOutlet.plan,
+        planName: planInfo.name,
+        dailyTxLimit: newOutlet.dailyTxLimit,
+        monthlyTxLimit: planInfo.monthlyTxLimit,
+        isUnlimited: planInfo.monthlyTxLimit === 0 || newOutlet.dailyTxLimit === 0,
+        currentMonthTxCount: 0,
       },
     });
   } catch (error: any) {
@@ -103,7 +151,7 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
 export const updateOutlet = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { code, name, city, address, phone, targetDailySales } = req.body;
+    const { code, name, city, address, phone, targetDailySales, plan, dailyTxLimit } = req.body;
 
     const existing = await prisma.outlet.findUnique({
       where: { id },
@@ -137,6 +185,11 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const planInfo = plan ? getPlanDetails(plan) : getPlanDetails(existing.plan);
+    const resolvedDailyTxLimit = dailyTxLimit !== undefined
+      ? parseInt(String(dailyTxLimit))
+      : (plan ? planInfo.dailyTxLimit : existing.dailyTxLimit);
+
     const updated = await prisma.outlet.update({
       where: { id },
       data: {
@@ -149,6 +202,8 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
           targetDailySales !== undefined
             ? parseFloat(String(targetDailySales)) || 0
             : existing.targetDailySales,
+        plan: plan ? planInfo.code : existing.plan,
+        dailyTxLimit: resolvedDailyTxLimit,
       },
     });
 
@@ -163,6 +218,11 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
         address: updated.address,
         phone: updated.phone,
         targetDailySales: Number(updated.targetDailySales),
+        plan: updated.plan,
+        planName: planInfo.name,
+        dailyTxLimit: updated.dailyTxLimit,
+        monthlyTxLimit: planInfo.monthlyTxLimit,
+        isUnlimited: planInfo.monthlyTxLimit === 0 || updated.dailyTxLimit === 0,
       },
     });
   } catch (error: any) {

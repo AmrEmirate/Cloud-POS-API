@@ -463,6 +463,16 @@ export const simulatePayInvoice = async (req: AuthRequest, res: Response) => {
         updateData.pricePerOutlet = planInfo.price;
         updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
         updateData.status = 'ACTIVE';
+
+        if (metadata.targetOutletId) {
+          await basePrisma.outlet.update({
+            where: { id: String(metadata.targetOutletId) },
+            data: {
+              plan: planInfo.code,
+              dailyTxLimit: planInfo.dailyTxLimit,
+            },
+          }).catch((err) => console.warn('[Approve Outlet Plan Update Warning]', err));
+        }
       }
     }
 
@@ -609,6 +619,16 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
           updateData.pricePerOutlet = planInfo.price;
           updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
           updateData.status = 'ACTIVE';
+
+          if (metadata.targetOutletId) {
+            await basePrisma.outlet.update({
+              where: { id: String(metadata.targetOutletId) },
+              data: {
+                plan: planInfo.code,
+                dailyTxLimit: planInfo.dailyTxLimit,
+              },
+            }).catch((err) => console.warn('[Subscription Outlet Plan Update Warning]', err));
+          }
         }
       }
 
