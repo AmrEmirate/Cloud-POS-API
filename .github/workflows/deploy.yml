@@ -56,11 +56,11 @@ jobs:
           if [ -n "$COOLIFY_WEBHOOK" ]; then
             echo "Memanggil Webhook Deploy Coolify..."
             if [ -n "$COOLIFY_TOKEN" ]; then
-              curl -s -f -X POST "$COOLIFY_WEBHOOK" -H "Authorization: Bearer $COOLIFY_TOKEN"
+              curl -s -f -X POST "$COOLIFY_WEBHOOK" -H "Authorization: Bearer $COOLIFY_TOKEN" || true
             else
-              curl -s -f -X GET "$COOLIFY_WEBHOOK" || curl -s -f -X POST "$COOLIFY_WEBHOOK"
+              curl -s -f -X GET "$COOLIFY_WEBHOOK" || curl -s -f -X POST "$COOLIFY_WEBHOOK" || true
             fi
-            echo "Webhook Coolify berhasil dipanggil."
+            echo "Webhook Coolify selesai dipanggil."
           else
             echo "Secret COOLIFY_WEBHOOK_URL belum disetel di GitHub Secrets. Melewati pemanggilan webhook."
           fi
