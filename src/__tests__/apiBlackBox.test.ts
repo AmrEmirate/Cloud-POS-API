@@ -16,16 +16,16 @@ describe('Black Box Testing: REST API Endpoints (Testing via HTTP Contract witho
     });
   });
 
-  describe('Endpoint: GET /api/v1/public/tenant-meta/dimsum-intan', () => {
+  describe('Endpoint: GET /api/v1/public/tenant-meta/dimsumintan', () => {
     it('should return 200 OK and tenant metadata', async () => {
       const response = await request(app)
-        .get('/api/v1/public/tenant-meta/dimsum-intan')
+        .get('/api/v1/public/tenant-meta/dimsumintan')
         .expect('Content-Type', /json/)
         .expect(200);
 
       expect(response.body.success).toBe(true);
       expect(response.body.tenant).toBeDefined();
-      expect(response.body.tenant.slug).toBe('dimsum-intan');
+      expect(response.body.tenant.slug).toBe('dimsumintan');
     });
   });
 

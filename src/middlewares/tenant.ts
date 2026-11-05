@@ -8,6 +8,16 @@ export interface TenantRequest extends Request {
 
 export const tenantResolutionMiddleware = async (req: TenantRequest, res: Response, next: NextFunction) => {
   try {
+    // 0. Skip tenant resolution for sales CRM routes, root/sales health checks
+    if (
+      req.path === '/health' ||
+      req.path === '/api/health' ||
+      req.path.startsWith('/api/v1/sales') ||
+      (req.path.startsWith('/api/') && !req.path.startsWith('/api/v1/'))
+    ) {
+      return next();
+    }
+
     let resolvedSlug: string | undefined;
     let resolvedId: string | undefined;
 
@@ -71,9 +81,13 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
       tenant = await basePrisma.tenant.findUnique({ where: { slug: resolvedSlug } });
     }
 
-    // 5. Fallback: if not resolved and not a superadmin route, fallback to default tenant 'dimsum-intan'
+    // 5. Fallback: if not resolved and not a superadmin route, fallback to default tenant 'dimsumintan'
     if (!tenant && !isSuperAdmin && !req.path.includes('/superadmin')) {
-      tenant = await basePrisma.tenant.findUnique({ where: { slug: 'dimsum-intan' } });
+      tenant = await basePrisma.tenant.findFirst({
+        where: {
+          OR: [{ slug: 'dimsumintan' }, { slug: 'dimsum-intan' }],
+        },
+      });
     }
 
     if (tenant) {

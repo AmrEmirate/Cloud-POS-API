@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { apiRouter } from './routes';
+import { salesApiRouter } from './sales';
 import { tenantResolutionMiddleware } from './middlewares/tenant';
 import { dynamicCors } from './middlewares/cors';
 
@@ -18,10 +19,14 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // 3. Multi-Tenant Context Resolution (Section 4.1 Blueprint)
 app.use(tenantResolutionMiddleware);
 
-// 4. API Routes
+// 4. API Routes - Cloud POS Core API
 app.use('/api/v1', apiRouter);
 
-// 5. Global Error Handler
+// 5. API Routes - ProtekSales CRM API (Dual Mount: /api/v1/sales & /api)
+app.use('/api/v1/sales', salesApiRouter);
+app.use('/api', salesApiRouter);
+
+// 6. Global Error Handler
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[Unhandled Error]', err);
   res.status(err.status || 500).json({

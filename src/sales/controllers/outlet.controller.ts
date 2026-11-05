@@ -1,0 +1,260 @@
+import { Response, NextFunction } from 'express';
+import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import prisma from '../config/prisma';
+import { InvoiceStatus, LicenseStatus, LeadStatus } from '../constants/enums';
+import { sendSuccess, sendError } from '../utils/response';
+import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
+import { getPackageByCodeOrFee } from '../constants/plans';
+import { CloudPosIntegrationService } from '../services/cloudPosIntegration';
+
+export class OutletController {
+  /**
+   * Mengambil daftar outlet binaan sales yang aktif berlangganan
+   * GET /api/outlets
+   */
+  static async getMyOutlets(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const salesId = req.user!.userId;
+      const userRole = req.user!.role;
+      const { search } = req.query;
+
+      const whereClause: any = userRole === 'ADMIN' ? {} : { salesId };
+
+      if (search && typeof search === 'string') {
+        const cleanSearch = sanitizePhoneNumber(search);
+        whereClause.OR = [
+          { name: { contains: search, mode: 'insensitive' } },
+          { ownerName: { contains: search, mode: 'insensitive' } },
+          ...(cleanSearch ? [{ phone: { contains: cleanSearch } }] : []),
+        ];
+      }
+
+      const outlets = await prisma.outlet.findMany({
+        where: whereClause,
+        include: {
+          license: true,
+          sales: {
+            select: { id: true, name: true, phone: true },
+          },
+          invoices: {
+            orderBy: { dueDate: 'desc' },
+            take: 1, // Invoice bulan berjalan / terakhir
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Format dengan indikator status pembayaran (Lunas, H-3 Jatuh Tempo, Menunggak)
+      const now = new Date();
+      const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+      const formattedOutlets = outlets.map((outlet) => {
+        const latestInvoice = outlet.invoices[0] || null;
+        let paymentIndicator: 'PAID' | 'DUE_SOON' | 'OVERDUE' | 'NO_INVOICE' = 'NO_INVOICE';
+
+        if (latestInvoice) {
+          if (latestInvoice.status === InvoiceStatus.PAID) {
+            paymentIndicator = 'PAID';
+          } else if (latestInvoice.status === InvoiceStatus.OVERDUE) {
+            paymentIndicator = 'OVERDUE';
+          } else if (latestInvoice.dueDate <= threeDaysFromNow) {
+            paymentIndicator = 'DUE_SOON';
+          } else {
+            paymentIndicator = 'PAID'; // Masih dalam periode normal
+          }
+        }
+
+        return {
+          id: outlet.id,
+          name: outlet.name,
+          ownerName: outlet.ownerName,
+          phone: outlet.phone,
+          address: outlet.address,
+          latitude: outlet.latitude,
+          longitude: outlet.longitude,
+          monthlyFee: outlet.monthlyFee,
+          sales: outlet.sales,
+          license: outlet.license,
+          latestInvoice,
+          paymentIndicator,
+        };
+      });
+
+      return sendSuccess(res, 'Daftar outlet aktif berhasil diambil.', formattedOutlets);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Detail Outlet, Lisensi, & Riwayat Tagihan
+   * GET /api/outlets/:id
+   */
+  static async getOutletDetail(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const id = req.params.id as string;
+      const salesId = req.user!.userId;
+      const userRole = req.user!.role;
+
+      const outlet = await prisma.outlet.findUnique({
+        where: { id },
+        include: {
+          sales: {
+            select: { id: true, name: true, phone: true, email: true },
+          },
+          license: true,
+          invoices: {
+            orderBy: { dueDate: 'desc' },
+            include: {
+              commission: true,
+            },
+          },
+          lead: {
+            include: {
+              visits: { orderBy: { visitDate: 'desc' }, take: 5 },
+            },
+          },
+        },
+      });
+
+      if (!outlet) {
+        return sendError(res, 'Outlet tidak ditemukan.', 404);
+      }
+
+      if (userRole !== 'ADMIN' && outlet.salesId !== salesId) {
+        return sendError(res, 'Anda tidak memiliki akses ke data outlet ini.', 403);
+      }
+
+      // Ambil data operasional live dari Cloud POS BE jika lisensi tersedia
+      let cloudPosOperational = null;
+      if (outlet.license?.licenseKey) {
+        cloudPosOperational = await CloudPosIntegrationService.getTenantByLicense(outlet.license.licenseKey);
+      }
+
+      return sendSuccess(res, 'Detail outlet berhasil diambil.', {
+        ...outlet,
+        cloudPosOperational,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Mengambil data telemetri & transaksi kasir live dari Cloud POS BE untuk outlet tertentu
+   * GET /api/outlets/:id/cloudpos-live
+   */
+  static async getOutletCloudPosLive(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const id = req.params.id as string;
+      const salesId = req.user!.userId;
+      const userRole = req.user!.role;
+
+      const outlet = await prisma.outlet.findUnique({
+        where: { id },
+        include: { license: true },
+      });
+
+      if (!outlet) {
+        return sendError(res, 'Outlet tidak ditemukan.', 404);
+      }
+
+      if (userRole !== 'ADMIN' && outlet.salesId !== salesId) {
+        return sendError(res, 'Anda tidak memiliki akses ke data outlet ini.', 403);
+      }
+
+      if (!outlet.license?.licenseKey) {
+        return sendSuccess(res, 'Outlet belum memiliki lisensi POS yang terdaftar.', {
+          connected: false,
+          licenseKey: null,
+          data: null,
+        });
+      }
+
+      const liveData = await CloudPosIntegrationService.getTenantByLicense(outlet.license.licenseKey);
+
+      return sendSuccess(res, 'Data operasional live Cloud POS berhasil diambil.', {
+        connected: !!liveData,
+        licenseKey: outlet.license.licenseKey,
+        data: liveData,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Onboarding Outlet Baru dari Prospek DEAL (atau langsung dibuat)
+   * POST /api/outlets
+   */
+  static async createOutlet(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const currentSalesId = req.user!.userId;
+      const userRole = req.user!.role;
+      const { leadId, name, ownerName, phone, address, latitude, longitude, monthlyFee, salesId, planCode, packageTier } = req.body;
+
+      // Assign sales: jika admin membuatkan untuk sales tertentu, gunakan salesId dari body
+      const assignedSalesId = userRole === 'ADMIN' && salesId ? salesId : currentSalesId;
+      const cleanPhone = sanitizePhoneNumber(phone);
+
+      if (!name || !ownerName || !cleanPhone || !address) {
+        return sendError(res, 'Nama outlet, nama pemilik, nomor telepon, dan alamat wajib diisi.', 400);
+      }
+
+      // Hitung paket langganan (100k, 150k, 200k, 250k)
+      const packagePlan = getPackageByCodeOrFee(planCode || packageTier || monthlyFee);
+      const effectiveMonthlyFee = packagePlan.monthlyFee;
+
+      // Generate lisensi acak: PROPOS-XXXX-XXXX
+      const randomKeyPart1 = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const randomKeyPart2 = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const generatedLicenseKey = `PROPOS-${randomKeyPart1}-${randomKeyPart2}`;
+
+      // Buat outlet sekaligus lisensinya
+      const outlet = await prisma.outlet.create({
+        data: {
+          leadId: leadId || undefined,
+          salesId: assignedSalesId,
+          name,
+          ownerName,
+          phone: cleanPhone,
+          address,
+          latitude: latitude ? parseFloat(latitude) : undefined,
+          longitude: longitude ? parseFloat(longitude) : undefined,
+          monthlyFee: effectiveMonthlyFee,
+          license: {
+            create: {
+              licenseKey: generatedLicenseKey,
+              status: LicenseStatus.ACTIVE,
+            },
+          },
+        },
+        include: {
+          license: true,
+          sales: { select: { id: true, name: true, phone: true } },
+        },
+      });
+
+      // Jika dibuat dari Lead, pastikan status Lead menjadi DEAL
+      if (leadId) {
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: { status: LeadStatus.DEAL },
+        });
+      }
+
+      // Otomatis sinkronkan dan lakukan provisioning tenant di Cloud POS API
+      CloudPosIntegrationService.provisionTenantToCloudPos({
+        name: outlet.name,
+        ownerName: outlet.ownerName,
+        phone: outlet.phone,
+        planCode: packagePlan.code,
+        licenseKey: generatedLicenseKey,
+      }).catch((err) => console.warn('[AutoProvision Warning]', err));
+
+      return sendSuccess(res, `Outlet ${outlet.name} (${packagePlan.name}) dan lisensi POS berhasil dibuat & disinkronkan ke Cloud POS.`, outlet, 201);
+    } catch (error: any) {
+      return sendError(res, error.message || 'Gagal membuat outlet.', 400);
+    }
+  }
+}

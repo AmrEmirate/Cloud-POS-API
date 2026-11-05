@@ -7,7 +7,8 @@ COPY prisma ./prisma/
 RUN npm install
 
 COPY . .
-RUN npx prisma generate
+RUN npx prisma generate --schema=prisma/schema.prisma
+RUN npx prisma generate --schema=prisma/sales.prisma
 RUN npm run build
 
 # STAGE 2: Production Runner (Yang akan dijalankan di VPS)

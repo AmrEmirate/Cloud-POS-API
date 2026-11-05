@@ -1,0 +1,283 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("SALES_DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/sales-client"
+}
+
+enum Role {
+  ADMIN
+  SALES
+}
+
+enum LeadStatus {
+  NEW
+  DEMO
+  DEAL
+  LOST
+  EXPIRED
+}
+
+enum DisputeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LicenseStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  OVERDUE
+}
+
+enum CommissionStatus {
+  READY
+  PENDING
+  WITHDRAWN
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model User {
+  id                String         @id @default(uuid())
+  name              String
+  email             String         @unique
+  password          String
+  phone             String
+  role              Role           @default(SALES)
+  commissionRate    Float          @default(25.0)
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountHolder String?
+  npwp              String?
+  tier              String         @default("Silver") // Silver, Gold, Platinum
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  leads             Lead[]         @relation("SalesLeads")
+  visits            VisitLog[]     @relation("SalesVisits")
+  outlets           Outlet[]       @relation("SalesOutlets")
+  commissions       Commission[]   @relation("SalesCommissions")
+  withdrawals       Withdrawal[]   @relation("SalesWithdrawals")
+  disputesClaimed   DisputeClaim[] @relation("ClaimantSales")
+  uiRequests        UiDesignRequest[] @relation("SalesUiRequests")
+
+  @@map("users")
+}
+
+model Lead {
+  id             String         @id @default(uuid())
+  salesId        String
+  storeName      String
+  ownerName      String
+  phone          String         // Format: 628...
+  address        String
+  latitude       Float?
+  longitude      Float?
+  notes          String?
+  status         LeadStatus     @default(NEW)
+  protectedUntil DateTime
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  sales          User           @relation("SalesLeads", fields: [salesId], references: [id], onDelete: Cascade)
+  visits         VisitLog[]
+  outlet         Outlet?
+  disputes       DisputeClaim[]
+  uiRequests     UiDesignRequest[]
+
+  @@index([phone])
+  @@index([salesId])
+  @@index([status])
+  @@index([protectedUntil])
+  @@map("leads")
+}
+
+model VisitLog {
+  id            String      @id @default(uuid())
+  leadId        String
+  salesId       String
+  notes         String
+  photoUrl      String?
+  statusAtVisit LeadStatus
+  visitDate     DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sales         User        @relation("SalesVisits", fields: [salesId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([salesId])
+  @@map("visit_logs")
+}
+
+model DisputeClaim {
+  id              String        @id @default(uuid())
+  leadId          String
+  claimantSalesId String
+  reason          String
+  proofUrl        String?
+  status          DisputeStatus @default(PENDING)
+  resolutionNotes String?
+  resolvedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  claimantSales   User          @relation("ClaimantSales", fields: [claimantSalesId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([claimantSalesId])
+  @@map("dispute_claims")
+}
+
+model Outlet {
+  id          String      @id @default(uuid())
+  leadId      String?     @unique
+  salesId     String
+  name        String
+  ownerName   String
+  phone       String
+  address     String
+  latitude    Float?
+  longitude   Float?
+  monthlyFee  Float       @default(150000)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  sales       User        @relation("SalesOutlets", fields: [salesId], references: [id], onDelete: Restrict)
+  lead        Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  license     License?
+  invoices    Invoice[]
+
+  @@index([salesId])
+  @@index([phone])
+  @@map("outlets")
+}
+
+model License {
+  id              String        @id @default(uuid())
+  outletId        String        @unique
+  licenseKey      String        @unique
+  status          LicenseStatus @default(ACTIVE)
+  machineId       String?
+  lastHeartbeatAt DateTime?
+  suspendedReason String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  outlet          Outlet        @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([licenseKey])
+  @@map("licenses")
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  outletId        String
+  invoiceNumber   String        @unique
+  amount          Float
+  billingPeriod   String
+  dueDate         DateTime
+  status          InvoiceStatus @default(UNPAID)
+  paidAt          DateTime?
+  paymentProofUrl String?
+  paymentNotes    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  outlet          Outlet        @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  commission      Commission?
+
+  @@index([outletId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model Commission {
+  id            String           @id @default(uuid())
+  salesId       String
+  invoiceId     String           @unique
+  invoiceAmount Float
+  percentage    Float
+  amount        Float
+  status        CommissionStatus @default(READY)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  sales         User             @relation("SalesCommissions", fields: [salesId], references: [id], onDelete: Cascade)
+  invoice       Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([salesId])
+  @@index([status])
+  @@map("commissions")
+}
+
+model Withdrawal {
+  id            String           @id @default(uuid())
+  salesId       String
+  amount        Float
+  taxAmount     Float?           // Potongan PPh 21 (misal 2.5% atau 3%)
+  netAmount     Float?           // Saldo bersih diterima (amount - taxAmount)
+  taxSlipUrl    String?          // URL Bukti Potong Pajak PPh 21
+  bankName      String
+  accountNumber String
+  accountHolder String
+  status        WithdrawalStatus @default(PENDING)
+  proofUrl      String?
+  adminNotes    String?
+  processedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  sales         User             @relation("SalesWithdrawals", fields: [salesId], references: [id], onDelete: Cascade)
+
+  @@index([salesId])
+  @@index([status])
+  @@map("withdrawals")
+}
+
+model UiDesignRequest {
+  id                 String      @id @default(uuid())
+  leadId             String?
+  salesId            String
+  storeName          String
+  category           String      @default("F&B")
+  primaryColor       String?     @default("#ea580c")
+  referenceImageUrl  String?
+  styleNotes         String?
+  stitchProjectId    String?
+  stitchScreenId     String?
+  previewUrl         String?
+  htmlCode           String?     @db.Text
+  themeConfig        Json?
+  revisionNotes      String?
+  revisionHistory    Json?
+  status             String      @default("REQUESTED") // REQUESTED, GENERATING, READY_REVIEW, REVISION_REQUESTED, APPROVED, DEPLOYED
+  deployedTenantSlug String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  lead               Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  sales              User        @relation("SalesUiRequests", fields: [salesId], references: [id], onDelete: Cascade)
+
+  @@index([salesId])
+  @@index([leadId])
+  @@index([status])
+  @@map("ui_design_requests")
+}
