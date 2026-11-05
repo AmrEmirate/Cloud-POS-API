@@ -51,13 +51,33 @@ export const createSubscriptionCheckout = async (req: AuthRequest, res: Response
       description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
       metadata.months = m;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
+      const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
-      const totalOutlets = Math.max(1, tenant.maxOutlets);
-      amount = planInfo.price * totalOutlets;
-      description = `Upgrade Paket SaaS ke ${planInfo.name} (${totalOutlets} Cabang)`;
+      const currentPrice = currentPlan.price || 100000;
+      const targetPrice = planInfo.price || 100000;
+      const priceDifference = Math.max(0, targetPrice - currentPrice);
+
+      amount = priceDifference;
+
+      let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
+      if (req.body.targetOutletId) {
+        const outlet = await basePrisma.outlet.findFirst({
+          where: { id: String(req.body.targetOutletId), tenantId: tenant.id },
+        });
+        if (outlet) {
+          targetOutletName = `${outlet.name} (${outlet.code})`;
+        }
+      }
+
+      description = `Upgrade Paket ke ${planInfo.name} [Cabang: ${targetOutletName}] (Selisih Rp ${priceDifference.toLocaleString('id-ID')}, Masa Aktif Berjalan Tetap)`;
       metadata.newPlan = planInfo.code;
       metadata.newPrice = planInfo.price;
       metadata.newDailyLimit = planInfo.dailyTxLimit;
+      metadata.currentPlan = currentPlan.code;
+      metadata.priceDifference = priceDifference;
+      metadata.targetOutletId = req.body.targetOutletId || null;
+      metadata.targetOutletName = targetOutletName;
+      metadata.keepExpiry = true;
     } else {
       return res.status(400).json({ success: false, message: 'Tipe tagihan langganan tidak valid!' });
     }

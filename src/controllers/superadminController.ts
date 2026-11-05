@@ -517,3 +517,182 @@ export const getTelemetry = async (_req: Request, res: Response) => {
   }
 };
 
+/**
+ * Superadmin: Fetch all subscription & license payment requests
+ */
+export const getSubscriptionRequests = async (_req: Request, res: Response) => {
+  try {
+    const invoices = await basePrisma.subscriptionInvoice.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            plan: true,
+            maxOutlets: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    const formatted = invoices.map((inv) => ({
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      tenantId: inv.tenantId,
+      tenantName: inv.tenant?.name || 'Dimsum Intan',
+      tenantSlug: inv.tenant?.slug || 'dimsum-intan',
+      tenantPlan: inv.tenant?.plan || 'PAKET_100K',
+      tenantMaxOutlets: inv.tenant?.maxOutlets || 1,
+      type: inv.type,
+      description: inv.description,
+      amount: Number(inv.amount),
+      status: inv.status,
+      paymentMethod: inv.paymentMethod || 'MANUAL_QRIS',
+      paidAt: inv.paidAt,
+      expiresAt: inv.expiresAt,
+      metadata: inv.metadata,
+      createdAt: inv.createdAt,
+    }));
+
+    res.json({ success: true, data: formatted });
+  } catch (error: any) {
+    console.error('[Superadmin Get Subscription Requests Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal memuat pengajuan langganan' });
+  }
+};
+
+/**
+ * Superadmin: Approve subscription payment request
+ */
+export const approveSubscriptionRequest = async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+
+    const invoice = await basePrisma.subscriptionInvoice.findUnique({
+      where: { id },
+      include: { tenant: true },
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice langganan tidak ditemukan' });
+    }
+
+    if (invoice.status === 'PAID') {
+      return res.status(400).json({ success: false, message: 'Invoice ini sudah disetujui sebelumnya' });
+    }
+
+    const tenant = (invoice as any).tenant || (await basePrisma.tenant.findUnique({ where: { id: invoice.tenantId } }));
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant untuk invoice ini tidak ditemukan' });
+    }
+
+    const metadata = (invoice.metadata as any) || {};
+    const now = new Date();
+
+    const tenantUpdateData: any = {};
+
+    if (invoice.type === 'ADD_OUTLET') {
+      const extra = Math.max(1, parseInt(String(metadata.extraOutlets || 1)));
+      tenantUpdateData.maxOutlets = (tenant.maxOutlets || 1) + extra;
+    } else if (invoice.type === 'RENEWAL') {
+      const m = Math.max(1, parseInt(String(metadata.months || 1)));
+      const currentExpiry = tenant.subscriptionExpiresAt ? new Date(tenant.subscriptionExpiresAt) : now;
+      const baseDate = currentExpiry > now ? currentExpiry : now;
+      const newExpiry = new Date(baseDate);
+      newExpiry.setMonth(newExpiry.getMonth() + m);
+      tenantUpdateData.subscriptionExpiresAt = newExpiry;
+      tenantUpdateData.status = 'ACTIVE';
+    } else if (invoice.type === 'ADD_TX_QUOTA') {
+      const extraQuota = parseInt(String(metadata.extraTxQuota || 250));
+      tenantUpdateData.extraDailyTxLimit = (tenant.extraDailyTxLimit || 0) + extraQuota;
+    } else if (invoice.type === 'UPGRADE_PLAN' || invoice.type === 'CHANGE_PLAN') {
+      if (metadata.newPlan) {
+        tenantUpdateData.plan = metadata.newPlan;
+      }
+      if (metadata.newPrice) {
+        tenantUpdateData.pricePerOutlet = metadata.newPrice;
+      }
+      if (metadata.newDailyLimit !== undefined) {
+        tenantUpdateData.dailyTxLimitPerOutlet = metadata.newDailyLimit;
+      }
+    }
+
+    // Jalankan update invoice dan tenant dalam transaksi
+    const [updatedInvoice, updatedTenant] = await basePrisma.$transaction([
+      basePrisma.subscriptionInvoice.update({
+        where: { id: String(id) },
+        data: {
+          status: 'PAID',
+          paidAt: now,
+          metadata: {
+            ...metadata,
+            approvedAt: now.toISOString(),
+            approvedBy: (req as any).user?.username || 'superadmin',
+          },
+        },
+      }),
+      basePrisma.tenant.update({
+        where: { id: tenant.id },
+        data: tenantUpdateData,
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      message: `Pembayaran ${invoice.invoiceNumber} berhasil disetujui! Kuota tenant ${updatedTenant.name} telah aktif.`,
+      data: {
+        invoice: updatedInvoice,
+        tenant: updatedTenant,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Superadmin Approve Subscription Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal menyetujui invoice' });
+  }
+};
+
+/**
+ * Superadmin: Reject subscription payment request
+ */
+export const rejectSubscriptionRequest = async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { reason = 'Bukti transfer tidak valid atau dana belum masuk' } = req.body;
+
+    const invoice = await basePrisma.subscriptionInvoice.findUnique({
+      where: { id: String(id) },
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice langganan tidak ditemukan' });
+    }
+
+    const metadata = (invoice.metadata as any) || {};
+
+    const updated = await basePrisma.subscriptionInvoice.update({
+      where: { id: String(id) },
+      data: {
+        status: 'REJECTED',
+        metadata: {
+          ...metadata,
+          rejectionReason: String(reason).trim(),
+          rejectedAt: new Date().toISOString(),
+          rejectedBy: (req as any).user?.username || 'superadmin',
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Invoice ${invoice.invoiceNumber} ditolak.`,
+      data: updated,
+    });
+  } catch (error: any) {
+    console.error('[Superadmin Reject Subscription Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal menolak invoice' });
+  }
+};
+

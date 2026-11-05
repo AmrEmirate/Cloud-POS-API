@@ -149,7 +149,7 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
-    const { type, quantity = 1, extraTxQuota = 250, months = 1, targetPlan } = req.body;
+    const { type, quantity = 1, extraTxQuota = 250, months = 1, targetPlan, targetOutletId } = req.body;
 
     let amount = 0;
     let description = '';
@@ -181,13 +181,35 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
       metadata.months = m;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
+      const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
-      const totalOutlets = Math.max(1, tenant.maxOutlets);
-      amount = planInfo.price * totalOutlets;
-      description = `Upgrade Paket SaaS ke ${planInfo.name} (${totalOutlets} Cabang)`;
+
+      // Selisih biaya upgrade (misal 100rb ke 150rb nambah 50rb)
+      const currentPrice = currentPlan.price || 100000;
+      const targetPrice = planInfo.price || 100000;
+      const priceDifference = Math.max(0, targetPrice - currentPrice);
+
+      amount = priceDifference;
+
+      let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
+      if (targetOutletId) {
+        const outlet = await basePrisma.outlet.findFirst({
+          where: { id: String(targetOutletId), tenantId: tenant.id },
+        });
+        if (outlet) {
+          targetOutletName = `${outlet.name} (${outlet.code})`;
+        }
+      }
+
+      description = `Upgrade Paket ke ${planInfo.name} [Cabang: ${targetOutletName}] (Selisih Rp ${priceDifference.toLocaleString('id-ID')}, Masa Aktif Berjalan Tetap)`;
       metadata.newPlan = planInfo.code;
       metadata.newPrice = planInfo.price;
       metadata.newDailyLimit = planInfo.dailyTxLimit;
+      metadata.currentPlan = currentPlan.code;
+      metadata.priceDifference = priceDifference;
+      metadata.targetOutletId = targetOutletId || null;
+      metadata.targetOutletName = targetOutletName;
+      metadata.keepExpiry = true;
     } else {
       return res.status(400).json({ success: false, message: 'Tipe pembayaran tagihan tidak valid!' });
     }
@@ -242,6 +264,136 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('[Checkout Billing Error]', error);
     res.status(500).json({ success: false, message: error.message || 'Gagal membuat tagihan' });
+  }
+};
+
+export const submitManualPayment = async (req: AuthRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant tidak teridentifikasi' });
+    }
+
+    const tenant = await basePrisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
+    }
+
+    const {
+      type = 'ADD_OUTLET',
+      quantity = 1,
+      extraTxQuota = 250,
+      months = 1,
+      targetPlan,
+      senderName,
+      senderBank,
+      proofImage,
+      notes,
+    } = req.body;
+
+    if (!senderName || !proofImage) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nama pengirim dan foto bukti transfer QRIS wajib dilampirkan!',
+      });
+    }
+
+    let amount = 0;
+    let description = '';
+    const metadata: any = {
+      type,
+      senderName: String(senderName).trim(),
+      senderBank: String(senderBank || 'QRIS / E-Wallet').trim(),
+      proofImage: String(proofImage),
+      notes: notes ? String(notes).trim() : '',
+      submittedAt: new Date().toISOString(),
+    };
+
+    const pricePerOutlet = Number(tenant.pricePerOutlet) || 100000;
+
+    if (type === 'ADD_OUTLET') {
+      const qty = Math.max(1, parseInt(String(quantity)) || 1);
+      amount = pricePerOutlet * qty;
+      description = `Penambahan ${qty} Kuota Cabang Outlet (QRIS Statis)`;
+      metadata.extraOutlets = qty;
+    } else if (type === 'ADD_TX_QUOTA') {
+      const quota = parseInt(String(extraTxQuota)) || 250;
+      let price = 25000;
+      if (quota <= 100) price = 15000;
+      else if (quota <= 250) price = 25000;
+      else price = 45000;
+
+      amount = price;
+      description = `Penambahan Kuota Transaksi +${(quota * 30).toLocaleString('id-ID')} Tx/Bulan per Cabang`;
+      metadata.extraTxQuota = quota;
+    } else if (type === 'RENEWAL') {
+      const m = Math.max(1, parseInt(String(months)) || 1);
+      const totalOutlets = Math.max(1, tenant.maxOutlets);
+      amount = pricePerOutlet * totalOutlets * m;
+      description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
+      metadata.months = m;
+    } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
+      const currentPlan = getPlanDetails(tenant.plan);
+      const planInfo = getPlanDetails(targetPlan);
+      const currentPrice = currentPlan.price || 100000;
+      const targetPrice = planInfo.price || 100000;
+      const priceDifference = Math.max(0, targetPrice - currentPrice);
+
+      amount = priceDifference;
+
+      let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
+      if (req.body.targetOutletId) {
+        const outlet = await basePrisma.outlet.findFirst({
+          where: { id: String(req.body.targetOutletId), tenantId: tenant.id },
+        });
+        if (outlet) {
+          targetOutletName = `${outlet.name} (${outlet.code})`;
+        }
+      }
+
+      description = `Upgrade Paket ke ${planInfo.name} [Cabang: ${targetOutletName}] (Selisih Rp ${priceDifference.toLocaleString('id-ID')}, Masa Aktif Berjalan Tetap)`;
+      metadata.newPlan = planInfo.code;
+      metadata.newPrice = planInfo.price;
+      metadata.newDailyLimit = planInfo.dailyTxLimit;
+      metadata.currentPlan = currentPlan.code;
+      metadata.priceDifference = priceDifference;
+      metadata.targetOutletId = req.body.targetOutletId || null;
+      metadata.targetOutletName = targetOutletName;
+      metadata.keepExpiry = true;
+    }
+
+    // Generate Invoice Number
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const randSuffix = Math.floor(1000 + Math.random() * 9000);
+    const invoiceNumber = `INV-QRIS/${dateStr}/${randSuffix}`;
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 hari verifikasi
+
+    // Simpan Invoice di Database dengan status PENDING_APPROVAL
+    const invoice = await basePrisma.subscriptionInvoice.create({
+      data: {
+        tenantId: tenant.id,
+        invoiceNumber,
+        type,
+        description,
+        amount,
+        status: 'PENDING_APPROVAL',
+        paymentMethod: 'MANUAL_QRIS',
+        expiresAt,
+        metadata,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Bukti transfer QRIS berhasil dikirim! Menunggu verifikasi dan persetujuan Superadmin.',
+      data: {
+        invoice,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Manual Payment Submit Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Gagal mengirim bukti pembayaran' });
   }
 };
 
