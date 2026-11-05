@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { PettyCashStatus, PettyCashCategory } from '@prisma/client';
+import { uploadFileToCloudinary } from '../services/cloudinaryService';
 
 export const getPettyCash = async (req: AuthRequest, res: Response) => {
   try {
@@ -96,7 +97,15 @@ export const createPettyCash = async (req: AuthRequest, res: Response) => {
     const count = await prisma.pettyCash.count({ where: { outletId: targetOutletId } });
     const expenseNumber = `PC-${outletCode}-${ymStr}-${String(count + 1).padStart(3, '0')}`;
 
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : (receiptImageUrl || 'https://images.unsplash.com/photo-1554415707-9e49017aed81?w=500&auto=format&fit=crop&q=80');
+    let imageUrl = receiptImageUrl || 'https://images.unsplash.com/photo-1554415707-9e49017aed81?w=500&auto=format&fit=crop&q=80';
+    if (req.file) {
+      try {
+        imageUrl = await uploadFileToCloudinary(req.file.path, 'dimsum_intan/petty_cash');
+      } catch (uploadErr) {
+        console.error('Cloudinary petty-cash upload error, falling back to local:', uploadErr);
+        imageUrl = `/uploads/${req.file.filename}`;
+      }
+    }
 
     const targetTenantId = req.user?.tenantId || null;
 

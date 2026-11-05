@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authenticateJwt } from '../middlewares/auth';
 import { requireRole } from '../middlewares/rbac';
 import { upload } from '../middlewares/upload';
+import { uploadFileToCloudinary } from '../services/cloudinaryService';
 
 import * as authController from '../controllers/authController';
 import * as outletController from '../controllers/outletController';
@@ -128,6 +129,26 @@ apiRouter.post('/menus', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), 
 apiRouter.put('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.updateMenu);
 apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), menuController.toggleAvailability);
 apiRouter.delete('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.deleteMenu);
+
+// Cloudinary File Upload Endpoint
+apiRouter.post('/upload', authenticateJwt, upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Tidak ada file gambar yang diunggah' });
+    }
+    const secureUrl = await uploadFileToCloudinary(req.file.path, 'dimsum_intan');
+    res.json({
+      success: true,
+      message: 'Foto berhasil disimpan ke Cloudinary CDN',
+      url: secureUrl,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Gagal mengunggah foto ke Cloudinary',
+    });
+  }
+});
 
 // 9. Kas Kecil Outlet (Petty Cash)
 apiRouter.get('/petty-cash', authenticateJwt, pettyCashController.getPettyCash);
