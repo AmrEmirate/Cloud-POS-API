@@ -89,10 +89,10 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
 
     const now = new Date();
     const expiresAt = tenant.subscriptionExpiresAt ? new Date(tenant.subscriptionExpiresAt) : null;
-    const isSubscriptionActive = expiresAt ? expiresAt > now : true;
-    const daysRemaining = expiresAt
+    const isSubscriptionActive = expiresAt ? expiresAt > now : false;
+    const daysRemaining = (expiresAt && expiresAt > now)
       ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-      : 30;
+      : 0;
 
     const isUnlimited = tenant.dailyTxLimitPerOutlet === 0 || currentPlan.dailyTxLimit === 0;
     const baseDaily = (tenant.dailyTxLimitPerOutlet !== undefined && tenant.dailyTxLimitPerOutlet !== null)
@@ -149,7 +149,15 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
-    const { type, quantity = 1, extraTxQuota = 250, months = 1, targetPlan, targetOutletId } = req.body;
+    const {
+      type,
+      quantity = 1,
+      extraTxQuota = 250,
+      months = 1,
+      targetPlan,
+      targetOutletId,
+      targetOutletIds,
+    } = req.body;
 
     let amount = 0;
     let description = '';
@@ -179,19 +187,44 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       const planInfo = targetPlan ? getPlanDetails(targetPlan) : getPlanDetails(tenant.plan);
       const effectivePrice = planInfo.price || pricePerOutlet;
 
+      let outletCount = 1;
       let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
-      const isSpecificOutlet = targetOutletId && targetOutletId !== 'all';
-      if (isSpecificOutlet) {
+      let resolvedOutletIds: string[] = [];
+
+      if (Array.isArray(targetOutletIds) && targetOutletIds.length > 0) {
+        const matchingOutlets = await basePrisma.outlet.findMany({
+          where: {
+            id: { in: targetOutletIds.map(String) },
+            tenantId: tenant.id,
+          },
+        });
+        if (matchingOutlets.length > 0) {
+          outletCount = matchingOutlets.length;
+          resolvedOutletIds = matchingOutlets.map((o) => o.id);
+          targetOutletName = matchingOutlets.map((o) => `${o.name} (${o.code})`).join(', ');
+        } else {
+          outletCount = Math.max(1, targetOutletIds.length);
+          resolvedOutletIds = targetOutletIds.map(String);
+          targetOutletName = `${outletCount} Cabang Terpilih`;
+        }
+        amount = effectivePrice * outletCount * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${outletCount} Cabang: ${targetOutletName}) x ${m} Bulan`;
+      } else if (targetOutletId && targetOutletId !== 'all') {
         const outlet = await basePrisma.outlet.findFirst({
           where: { id: String(targetOutletId), tenantId: tenant.id },
         });
         if (outlet) {
           targetOutletName = `${outlet.name} (${outlet.code})`;
+          resolvedOutletIds = [outlet.id];
+        } else {
+          resolvedOutletIds = [String(targetOutletId)];
         }
+        outletCount = 1;
         amount = effectivePrice * 1 * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
       } else {
-        const totalOutlets = Math.max(1, tenant.maxOutlets);
+        const totalOutlets = Math.max(1, tenant.maxOutlets || 1);
+        outletCount = totalOutlets;
         amount = effectivePrice * totalOutlets * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
       }
@@ -201,8 +234,10 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       metadata.newPlan = planInfo.code;
       metadata.newPrice = planInfo.price;
       metadata.newDailyLimit = planInfo.dailyTxLimit;
-      metadata.targetOutletId = isSpecificOutlet ? targetOutletId : null;
+      metadata.targetOutletId = resolvedOutletIds[0] || null;
+      metadata.targetOutletIds = resolvedOutletIds;
       metadata.targetOutletName = targetOutletName;
+      metadata.outletCount = outletCount;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
       const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
@@ -310,6 +345,7 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       months = 1,
       targetPlan,
       targetOutletId,
+      targetOutletIds,
       senderName,
       senderBank,
       proofImage,
@@ -391,19 +427,44 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       const planInfo = targetPlan ? getPlanDetails(targetPlan) : getPlanDetails(tenant.plan);
       const effectivePrice = planInfo.price || pricePerOutlet;
 
+      let outletCount = 1;
       let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
-      const isSpecificOutlet = targetOutletId && targetOutletId !== 'all';
-      if (isSpecificOutlet) {
+      let resolvedOutletIds: string[] = [];
+
+      if (Array.isArray(targetOutletIds) && targetOutletIds.length > 0) {
+        const matchingOutlets = await basePrisma.outlet.findMany({
+          where: {
+            id: { in: targetOutletIds.map(String) },
+            tenantId: tenant.id,
+          },
+        });
+        if (matchingOutlets.length > 0) {
+          outletCount = matchingOutlets.length;
+          resolvedOutletIds = matchingOutlets.map((o) => o.id);
+          targetOutletName = matchingOutlets.map((o) => `${o.name} (${o.code})`).join(', ');
+        } else {
+          outletCount = Math.max(1, targetOutletIds.length);
+          resolvedOutletIds = targetOutletIds.map(String);
+          targetOutletName = `${outletCount} Cabang Terpilih`;
+        }
+        amount = effectivePrice * outletCount * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${outletCount} Cabang: ${targetOutletName}) x ${m} Bulan`;
+      } else if (targetOutletId && targetOutletId !== 'all') {
         const outlet = await basePrisma.outlet.findFirst({
           where: { id: String(targetOutletId), tenantId: tenant.id },
         });
         if (outlet) {
           targetOutletName = `${outlet.name} (${outlet.code})`;
+          resolvedOutletIds = [outlet.id];
+        } else {
+          resolvedOutletIds = [String(targetOutletId)];
         }
+        outletCount = 1;
         amount = effectivePrice * 1 * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
       } else {
-        const totalOutlets = Math.max(1, tenant.maxOutlets);
+        const totalOutlets = Math.max(1, tenant.maxOutlets || 1);
+        outletCount = totalOutlets;
         amount = effectivePrice * totalOutlets * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
       }
@@ -413,8 +474,10 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       metadata.newPlan = planInfo.code;
       metadata.newPrice = planInfo.price;
       metadata.newDailyLimit = planInfo.dailyTxLimit;
-      metadata.targetOutletId = isSpecificOutlet ? targetOutletId : null;
+      metadata.targetOutletId = resolvedOutletIds[0] || null;
+      metadata.targetOutletIds = resolvedOutletIds;
       metadata.targetOutletName = targetOutletName;
+      metadata.outletCount = outletCount;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
       const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
@@ -622,6 +685,30 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
         const newExpiry = new Date(baseDate.getTime() + months * 30 * 24 * 60 * 60 * 1000);
         updateData.subscriptionExpiresAt = newExpiry;
         updateData.status = 'ACTIVE';
+
+        if (metadata.newPlan) {
+          const planInfo = getPlanDetails(metadata.newPlan);
+          updateData.plan = planInfo.code;
+          updateData.pricePerOutlet = planInfo.price;
+          updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
+        }
+
+        const outletIds: string[] = Array.isArray(metadata.targetOutletIds)
+          ? metadata.targetOutletIds
+          : metadata.targetOutletId && metadata.targetOutletId !== 'all'
+          ? [metadata.targetOutletId]
+          : [];
+
+        if (outletIds.length > 0 && metadata.newPlan) {
+          const planInfo = getPlanDetails(metadata.newPlan);
+          await basePrisma.outlet.updateMany({
+            where: { id: { in: outletIds.map(String) } },
+            data: {
+              plan: planInfo.code,
+              dailyTxLimit: planInfo.dailyTxLimit,
+            },
+          }).catch((err) => console.warn('[Subscription Outlet Plan Update Warning]', err));
+        }
       } else if (invoice.type === 'CHANGE_PLAN' || invoice.type === 'UPGRADE_PLAN') {
         if (metadata.newPlan) {
           const planInfo = getPlanDetails(metadata.newPlan);

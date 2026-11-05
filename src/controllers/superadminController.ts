@@ -630,9 +630,15 @@ export const approveSubscriptionRequest = async (req: Request, res: Response) =>
       }
     }
 
-    if (metadata.targetOutletId && metadata.newPlan) {
-      await basePrisma.outlet.update({
-        where: { id: String(metadata.targetOutletId) },
+    const targetOutletIds: string[] = Array.isArray(metadata.targetOutletIds)
+      ? metadata.targetOutletIds
+      : metadata.targetOutletId && metadata.targetOutletId !== 'all'
+      ? [metadata.targetOutletId]
+      : [];
+
+    if (targetOutletIds.length > 0 && metadata.newPlan) {
+      await basePrisma.outlet.updateMany({
+        where: { id: { in: targetOutletIds.map(String) } },
         data: {
           plan: metadata.newPlan,
           dailyTxLimit: metadata.newDailyLimit !== undefined ? metadata.newDailyLimit : 200,
