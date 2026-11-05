@@ -6,4 +6,4 @@ export {
   InvoiceStatus,
   CommissionStatus,
   WithdrawalStatus,
-} from '../../generated/sales-client';
+} from '@prisma/sales-client';

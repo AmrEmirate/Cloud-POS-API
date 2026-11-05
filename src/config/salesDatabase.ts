@@ -1,4 +1,4 @@
-import { PrismaClient as SalesPrismaClient } from '../generated/sales-client';
+import { PrismaClient as SalesPrismaClient } from '@prisma/sales-client';
 
 const salesDatabaseUrl =
   process.env.SALES_DATABASE_URL ||
