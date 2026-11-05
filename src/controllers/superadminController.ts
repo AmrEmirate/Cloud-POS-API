@@ -605,6 +605,16 @@ export const approveSubscriptionRequest = async (req: Request, res: Response) =>
       newExpiry.setMonth(newExpiry.getMonth() + m);
       tenantUpdateData.subscriptionExpiresAt = newExpiry;
       tenantUpdateData.status = 'ACTIVE';
+
+      if (metadata.newPlan) {
+        tenantUpdateData.plan = metadata.newPlan;
+      }
+      if (metadata.newPrice) {
+        tenantUpdateData.pricePerOutlet = metadata.newPrice;
+      }
+      if (metadata.newDailyLimit !== undefined) {
+        tenantUpdateData.dailyTxLimitPerOutlet = metadata.newDailyLimit;
+      }
     } else if (invoice.type === 'ADD_TX_QUOTA') {
       const extraQuota = parseInt(String(metadata.extraTxQuota || 250));
       tenantUpdateData.extraDailyTxLimit = (tenant.extraDailyTxLimit || 0) + extraQuota;

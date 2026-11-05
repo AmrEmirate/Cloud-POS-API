@@ -176,10 +176,33 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
       metadata.extraTxQuota = quota;
     } else if (type === 'RENEWAL') {
       const m = Math.max(1, parseInt(String(months)) || 1);
-      const totalOutlets = Math.max(1, tenant.maxOutlets);
-      amount = pricePerOutlet * totalOutlets * m;
-      description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
+      const planInfo = targetPlan ? getPlanDetails(targetPlan) : getPlanDetails(tenant.plan);
+      const effectivePrice = planInfo.price || pricePerOutlet;
+
+      let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
+      const isSpecificOutlet = targetOutletId && targetOutletId !== 'all';
+      if (isSpecificOutlet) {
+        const outlet = await basePrisma.outlet.findFirst({
+          where: { id: String(targetOutletId), tenantId: tenant.id },
+        });
+        if (outlet) {
+          targetOutletName = `${outlet.name} (${outlet.code})`;
+        }
+        amount = effectivePrice * 1 * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
+      } else {
+        const totalOutlets = Math.max(1, tenant.maxOutlets);
+        amount = effectivePrice * totalOutlets * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
+      }
+
       metadata.months = m;
+      metadata.renewedPlan = planInfo.code;
+      metadata.newPlan = planInfo.code;
+      metadata.newPrice = planInfo.price;
+      metadata.newDailyLimit = planInfo.dailyTxLimit;
+      metadata.targetOutletId = isSpecificOutlet ? targetOutletId : null;
+      metadata.targetOutletName = targetOutletName;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
       const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
@@ -286,6 +309,7 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       extraTxQuota = 250,
       months = 1,
       targetPlan,
+      targetOutletId,
       senderName,
       senderBank,
       proofImage,
@@ -364,10 +388,33 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       metadata.extraTxQuota = quota;
     } else if (type === 'RENEWAL') {
       const m = Math.max(1, parseInt(String(months)) || 1);
-      const totalOutlets = Math.max(1, tenant.maxOutlets);
-      amount = pricePerOutlet * totalOutlets * m;
-      description = `Perpanjangan Langganan POS ${totalOutlets} Cabang x ${m} Bulan`;
+      const planInfo = targetPlan ? getPlanDetails(targetPlan) : getPlanDetails(tenant.plan);
+      const effectivePrice = planInfo.price || pricePerOutlet;
+
+      let targetOutletName = 'Semua Cabang / Cabang Terdaftar';
+      const isSpecificOutlet = targetOutletId && targetOutletId !== 'all';
+      if (isSpecificOutlet) {
+        const outlet = await basePrisma.outlet.findFirst({
+          where: { id: String(targetOutletId), tenantId: tenant.id },
+        });
+        if (outlet) {
+          targetOutletName = `${outlet.name} (${outlet.code})`;
+        }
+        amount = effectivePrice * 1 * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
+      } else {
+        const totalOutlets = Math.max(1, tenant.maxOutlets);
+        amount = effectivePrice * totalOutlets * m;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
+      }
+
       metadata.months = m;
+      metadata.renewedPlan = planInfo.code;
+      metadata.newPlan = planInfo.code;
+      metadata.newPrice = planInfo.price;
+      metadata.newDailyLimit = planInfo.dailyTxLimit;
+      metadata.targetOutletId = isSpecificOutlet ? targetOutletId : null;
+      metadata.targetOutletName = targetOutletName;
     } else if (type === 'CHANGE_PLAN' || type === 'UPGRADE_PLAN') {
       const currentPlan = getPlanDetails(tenant.plan);
       const planInfo = getPlanDetails(targetPlan);
