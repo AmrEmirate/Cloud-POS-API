@@ -280,6 +280,7 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
     }
 
     const {
+      invoiceId,
       type = 'ADD_OUTLET',
       quantity = 1,
       extraTxQuota = 250,
@@ -295,6 +296,41 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({
         success: false,
         message: 'Nama pengirim dan foto bukti transfer QRIS wajib dilampirkan!',
+      });
+    }
+
+    // Jika user mengunggah bukti untuk invoice yang sudah ada
+    if (invoiceId) {
+      const existing = await basePrisma.subscriptionInvoice.findFirst({
+        where: { id: String(invoiceId), tenantId: tenant.id },
+      });
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Faktur invoice tidak ditemukan' });
+      }
+
+      const currentMeta = (existing.metadata as any) || {};
+      const updatedInvoice = await basePrisma.subscriptionInvoice.update({
+        where: { id: existing.id },
+        data: {
+          status: 'PENDING_APPROVAL',
+          paymentMethod: 'MANUAL_QRIS',
+          metadata: {
+            ...currentMeta,
+            senderName: String(senderName).trim(),
+            senderBank: String(senderBank || 'QRIS / E-Wallet').trim(),
+            proofImage: String(proofImage),
+            notes: notes ? String(notes).trim() : '',
+            submittedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: 'Bukti transfer QRIS berhasil dikirim! Menunggu verifikasi dan persetujuan Superadmin.',
+        data: {
+          invoice: updatedInvoice,
+        },
       });
     }
 
@@ -418,86 +454,13 @@ export const getInvoices = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Handle Mock / Instant Test Payment (Bisa dipicu dari tombol simulasi bayar QRIS/VA)
+ * Handle Mock / Instant Test Payment (Dinonaktifkan pada tahap produksi)
  */
-export const simulatePayInvoice = async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    const invoice = await basePrisma.subscriptionInvoice.findUnique({
-      where: { id: String(id) },
-      include: { tenant: true },
-    });
-
-    if (!invoice) {
-      return res.status(404).json({ success: false, message: 'Invoice tidak ditemukan' });
-    }
-
-    if (invoice.status === 'PAID') {
-      return res.json({ success: true, message: 'Invoice sudah lunas sebelumnya', data: invoice });
-    }
-
-    const metadata = (invoice.metadata as any) || {};
-    const tenant = invoice.tenant;
-
-    // Terapkan manfaat paket ke Tenant
-    let updateData: any = {};
-
-    if (invoice.type === 'ADD_OUTLET') {
-      const extra = metadata.extraOutlets || 1;
-      updateData.maxOutlets = tenant.maxOutlets + extra;
-    } else if (invoice.type === 'ADD_TX_QUOTA') {
-      const extraQuota = metadata.extraTxQuota || 250;
-      updateData.extraDailyTxLimit = tenant.extraDailyTxLimit + extraQuota;
-    } else if (invoice.type === 'RENEWAL') {
-      const months = metadata.months || 1;
-      const currentExpiry = tenant.subscriptionExpiresAt ? new Date(tenant.subscriptionExpiresAt) : new Date();
-      const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
-      const newExpiry = new Date(baseDate.getTime() + months * 30 * 24 * 60 * 60 * 1000);
-      updateData.subscriptionExpiresAt = newExpiry;
-      updateData.status = 'ACTIVE';
-    } else if (invoice.type === 'CHANGE_PLAN' || invoice.type === 'UPGRADE_PLAN') {
-      if (metadata.newPlan) {
-        const planInfo = getPlanDetails(metadata.newPlan);
-        updateData.plan = planInfo.code;
-        updateData.pricePerOutlet = planInfo.price;
-        updateData.dailyTxLimitPerOutlet = planInfo.dailyTxLimit;
-        updateData.status = 'ACTIVE';
-
-        if (metadata.targetOutletId) {
-          await basePrisma.outlet.update({
-            where: { id: String(metadata.targetOutletId) },
-            data: {
-              plan: planInfo.code,
-              dailyTxLimit: planInfo.dailyTxLimit,
-            },
-          }).catch((err) => console.warn('[Approve Outlet Plan Update Warning]', err));
-        }
-      }
-    }
-
-    await basePrisma.tenant.update({
-      where: { id: tenant.id },
-      data: updateData,
-    });
-
-    const updatedInvoice = await basePrisma.subscriptionInvoice.update({
-      where: { id: invoice.id },
-      data: {
-        status: 'PAID',
-        paidAt: new Date(),
-      },
-    });
-
-    res.json({
-      success: true,
-      message: `Pembayaran ${invoice.description} berhasil diverifikasi! Kuota dan paket aktif seketika.`,
-      data: updatedInvoice,
-    });
-  } catch (error: any) {
-    console.error('[Simulate Pay Error]', error);
-    res.status(500).json({ success: false, message: error.message || 'Gagal memproses pembayaran' });
-  }
+export const simulatePayInvoice = async (_req: AuthRequest, res: Response) => {
+  return res.status(403).json({
+    success: false,
+    message: 'Simulasi dinonaktifkan pada tahap produksi! Harap kirim bukti transfer QRIS resmi untuk diverifikasi oleh Superadmin.',
+  });
 };
 
 /**

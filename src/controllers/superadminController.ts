@@ -620,6 +620,16 @@ export const approveSubscriptionRequest = async (req: Request, res: Response) =>
       }
     }
 
+    if (metadata.targetOutletId && metadata.newPlan) {
+      await basePrisma.outlet.update({
+        where: { id: String(metadata.targetOutletId) },
+        data: {
+          plan: metadata.newPlan,
+          dailyTxLimit: metadata.newDailyLimit !== undefined ? metadata.newDailyLimit : 200,
+        },
+      }).catch((err) => console.warn('[Superadmin Outlet Plan Update Warning]', err));
+    }
+
     // Jalankan update invoice dan tenant dalam transaksi
     const [updatedInvoice, updatedTenant] = await basePrisma.$transaction([
       basePrisma.subscriptionInvoice.update({

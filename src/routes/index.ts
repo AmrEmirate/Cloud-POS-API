@@ -73,6 +73,24 @@ apiRouter.delete(
   requireRole(['SUPERADMIN']),
   superadminController.deleteTenant
 );
+apiRouter.get(
+  '/superadmin/invoices',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  superadminController.getSubscriptionRequests
+);
+apiRouter.post(
+  '/superadmin/invoices/:id/approve',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  superadminController.approveSubscriptionRequest
+);
+apiRouter.post(
+  '/superadmin/invoices/:id/reject',
+  authenticateJwt,
+  requireRole(['SUPERADMIN']),
+  superadminController.rejectSubscriptionRequest
+);
 
 // 4. Autentikasi & Manajemen Pengguna
 apiRouter.post('/auth/login', authController.login);
@@ -152,6 +170,12 @@ apiRouter.post(
   authenticateJwt,
   requireRole(['SUPERADMIN', 'OWNER']),
   billingController.createCheckout
+);
+apiRouter.post(
+  '/billing/manual-pay',
+  authenticateJwt,
+  requireRole(['SUPERADMIN', 'OWNER']),
+  billingController.submitManualPayment
 );
 apiRouter.get(
   '/billing/invoices',
