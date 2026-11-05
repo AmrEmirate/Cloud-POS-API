@@ -128,6 +128,23 @@ describe('Black Box Testing: ProtekSales REST API Contracts', () => {
       expect(res.body.message).toContain('Akses ditolak. Endpoint ini hanya untuk role: ADMIN');
     });
 
+    it('Endpoint: POST /api/admin/sales input validation for missing required fields', async () => {
+      const adminToken = signToken({
+        userId: 'admin-uuid-1',
+        email: 'admin@protek.id',
+        role: 'ADMIN',
+      });
+
+      const res = await request(app)
+        .post('/api/admin/sales')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: '' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Nama lengkap');
+    });
+
     it('should return 404 for non-existent routes', async () => {
       const res = await request(app).get('/api/unregistered-path-1234');
       expect(res.status).toBe(404);

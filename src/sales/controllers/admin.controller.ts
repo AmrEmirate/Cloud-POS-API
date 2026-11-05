@@ -1,8 +1,10 @@
 import { Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import prisma from '../config/prisma';
-import { LicenseStatus, WithdrawalStatus, DisputeStatus, CommissionStatus } from '../constants/enums';
+import { Role, LicenseStatus, WithdrawalStatus, DisputeStatus, CommissionStatus } from '../constants/enums';
 import { sendSuccess, sendError } from '../utils/response';
+import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
 import { BillingService } from '../services/billing.service';
 import { LicenseService } from '../services/license.service';
 import { CloudPosIntegrationService } from '../services/cloudPosIntegration';
@@ -541,6 +543,137 @@ export class AdminController {
         orderBy: { createdAt: 'desc' },
       });
       return sendSuccess(res, 'Daftar pengajuan desain UI UMKM berhasil diambil.', requests);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * 15. Tambah Akun Mitra Sales Baru oleh Admin
+   * POST /api/admin/sales
+   */
+  static async createSalesAccount(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const {
+        name,
+        email,
+        password,
+        phone,
+        commissionRate,
+        tier,
+        bankName,
+        bankAccountNumber,
+        bankAccountHolder,
+        npwp,
+      } = req.body;
+
+      if (!name || !name.trim()) {
+        return sendError(res, 'Nama lengkap mitra sales wajib diisi.', 400);
+      }
+      if (!email || !email.trim()) {
+        return sendError(res, 'Email bisnis / login wajib diisi.', 400);
+      }
+      if (!password || password.length < 6) {
+        return sendError(res, 'Password akun minimal 6 karakter.', 400);
+      }
+      if (!phone || !phone.trim()) {
+        return sendError(res, 'Nomor HP / WhatsApp wajib diisi.', 400);
+      }
+
+      const cleanPhone = sanitizePhoneNumber(phone);
+      const cleanEmail = email.trim().toLowerCase();
+
+      // Cek apakah email sudah terdaftar
+      const existingUser = await prisma.user.findUnique({
+        where: { email: cleanEmail },
+      });
+      if (existingUser) {
+        return sendError(res, `Email "${cleanEmail}" sudah terdaftar pada sistem.`, 400);
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const parsedCommissionRate =
+        commissionRate !== undefined && !isNaN(Number(commissionRate))
+          ? Math.min(100, Math.max(0, parseFloat(commissionRate)))
+          : 25.0;
+
+      const validTier = ['Silver', 'Gold', 'Platinum'].includes(tier) ? tier : 'Silver';
+
+      const newSales = await prisma.user.create({
+        data: {
+          name: name.trim(),
+          email: cleanEmail,
+          password: hashedPassword,
+          phone: cleanPhone,
+          role: Role.SALES,
+          commissionRate: parsedCommissionRate,
+          tier: validTier,
+          bankName: bankName?.trim() || null,
+          bankAccountNumber: bankAccountNumber?.trim() || null,
+          bankAccountHolder: bankAccountHolder?.trim() || null,
+          npwp: npwp?.trim() || null,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          commissionRate: true,
+          tier: true,
+          bankName: true,
+          bankAccountNumber: true,
+          bankAccountHolder: true,
+          npwp: true,
+          createdAt: true,
+        },
+      });
+
+      return sendSuccess(res, `Akun mitra sales "${newSales.name}" berhasil dibuat dan diterbitkan.`, newSales, 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * 16. Hapus Akun Mitra Sales oleh Admin
+   * DELETE /api/admin/sales/:id
+   */
+  static async deleteSalesAccount(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const id = req.params.id as string;
+
+      const sales = await prisma.user.findUnique({
+        where: { id },
+        include: {
+          outlets: { select: { id: true } },
+          leads: { select: { id: true } },
+        },
+      });
+
+      if (!sales) {
+        return sendError(res, 'Akun mitra sales tidak ditemukan.', 404);
+      }
+
+      if (sales.role !== Role.SALES) {
+        return sendError(res, 'Hanya akun dengan role SALES yang dapat dihapus dari menu ini.', 400);
+      }
+
+      if (sales.outlets.length > 0) {
+        return sendError(
+          res,
+          `Sales "${sales.name}" memiliki ${sales.outlets.length} outlet binaan aktif. Alihkan outlet terlebih dahulu sebelum menghapus akun.`,
+          400
+        );
+      }
+
+      await prisma.user.delete({
+        where: { id },
+      });
+
+      return sendSuccess(res, `Akun mitra sales "${sales.name}" berhasil dihapus dari sistem.`);
     } catch (error) {
       next(error);
     }

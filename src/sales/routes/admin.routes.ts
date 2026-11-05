@@ -27,8 +27,10 @@ router.post('/licenses/:id/toggle', AdminController.toggleLicenseSwitch);
 router.get('/disputes', AdminController.getDisputes);
 router.post('/disputes/:id/resolve', AdminController.resolveDispute);
 
-// 7. Daftar Sales & Atur Persentase Komisi
+// 7. Daftar Sales, Tambah Akun Sales, & Atur Persentase Komisi
 router.get('/sales', AdminController.getAllSales);
+router.post('/sales', AdminController.createSalesAccount);
+router.delete('/sales/:id', AdminController.deleteSalesAccount);
 router.patch('/sales/commission-rate/bulk', AdminController.updateBulkCommissionRate);
 router.patch('/sales/:id/commission-rate', AdminController.updateSalesCommissionRate);
 
