@@ -28,4 +28,7 @@ router.post('/:id/visits', LeadController.addVisitLog);
 // 7. Ajukan Banding Sengketa Prospek
 router.post('/:id/dispute', LeadController.fileDispute);
 
+// 8. Antigravity Automated Provisioning dari Check-in Deal UMKM
+router.post('/provision-tenant', LeadController.provisionTenantFromLead);
+
 export default router;

@@ -1,10 +1,14 @@
 import { Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { LeadService } from '../services/lead.service';
 import { sendSuccess, sendError } from '../utils/response';
 import prisma from '../config/prisma';
-import { LeadStatus } from '../constants/enums';
+import { LeadStatus, LicenseStatus } from '../constants/enums';
 import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
+import { basePrisma } from '../../config/database';
+import { getPlanDetails } from '../../config/plans';
+import { Role as BaseRole } from '@prisma/client';
 
 export class LeadController {
   /**
@@ -265,6 +269,186 @@ export class LeadController {
       });
 
       return sendSuccess(res, 'Permohonan sengketa berhasil diajukan dan akan ditinjau Admin.', dispute, 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * 8. Antigravity Automated Provisioning dari Check-in Deal UMKM
+   * POST /api/leads/provision-tenant
+   */
+  static async provisionTenantFromLead(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const salesId = req.user!.userId;
+      const {
+        leadId,
+        storeName,
+        ownerName,
+        phone,
+        address,
+        category,
+        subdomain: rawSlug,
+        customDomain,
+        planCode = 'PAKET_150K',
+        username,
+        password,
+        themeColor = '#ea580c',
+        themeConfig,
+        outletCount = 1,
+      } = req.body;
+
+      if (!storeName || !storeName.trim()) {
+        return sendError(res, 'Nama usaha / toko UMKM wajib diisi!', 400);
+      }
+      if (!username || !username.trim()) {
+        return sendError(res, 'Username akun pemilik UMKM wajib diisi!', 400);
+      }
+      if (!password || password.length < 6) {
+        return sendError(res, 'Password akun pemilik UMKM minimal 6 karakter!', 400);
+      }
+
+      const cleanPhone = sanitizePhoneNumber(phone || '081200000000');
+      const cleanSlug = (rawSlug || storeName.toLowerCase().replace(/[^a-z0-9-]/g, '')).trim();
+
+      // Cek apakah slug sudah ada di database tenant
+      const existingSlug = await basePrisma.tenant.findUnique({ where: { slug: cleanSlug } });
+      if (existingSlug) {
+        return sendError(res, `Subdomain / Slug "${cleanSlug}" sudah dipakai tenant lain. Silakan pilih slug lain.`, 400);
+      }
+
+      // Cek apakah username sudah ada di database tenant
+      const existingUser = await basePrisma.user.findFirst({ where: { username: username.trim() } });
+      if (existingUser) {
+        return sendError(res, `Username "${username}" sudah digunakan di Cloud POS. Silakan gunakan username lain.`, 400);
+      }
+
+      const planConfig = getPlanDetails(planCode);
+      const licenseKey = `LIC-${cleanSlug.toUpperCase()}-${Date.now().toString().slice(-4)}`;
+      const passwordHash = await bcrypt.hash(password, 10);
+      const pinHash = await bcrypt.hash('1234', 10);
+
+      // 1. Buat Tenant, Outlet Utama, dan Owner di database tenant (dimsum_db / basePrisma)
+      const tenantResult = await basePrisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: {
+            name: storeName.trim(),
+            slug: cleanSlug,
+            customDomain: customDomain ? customDomain.trim().toLowerCase() : `${cleanSlug}.vimtk.cloud`,
+            plan: planConfig.code,
+            pricePerOutlet: planConfig.price,
+            maxOutlets: Number(outletCount) || 1,
+            dailyTxLimitPerOutlet: planConfig.dailyTxLimit,
+            licenseKey,
+            status: 'ACTIVE',
+            themeColor: themeColor || '#ea580c',
+            themeConfig: themeConfig || {
+              storeName: storeName.trim(),
+              category: category || 'F&B Retail',
+              primaryColor: themeColor || '#ea580c',
+            },
+          },
+        });
+
+        const outlet = await tx.outlet.create({
+          data: {
+            tenantId: tenant.id,
+            code: 'CB-01',
+            name: `${storeName.trim()} Cabang Utama`,
+            city: 'Indonesia',
+            address: address ? address.trim() : 'Alamat Operasional',
+            phone: cleanPhone,
+            plan: planConfig.code,
+            dailyTxLimit: planConfig.dailyTxLimit || 200,
+            targetDailySales: 5000000,
+          },
+        });
+
+        const owner = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            outletId: outlet.id,
+            name: (ownerName || 'Pemilik Toko').trim(),
+            username: username.trim(),
+            passwordHash,
+            pinHash,
+            role: BaseRole.OWNER,
+          },
+        });
+
+        return { tenant, outlet, owner };
+      });
+
+      // 2. Buat Outlet & Lisensi di ProtekSales (proteksales_db) ditautkan ke sales ini
+      const protekOutlet = await prisma.outlet.create({
+        data: {
+          leadId: leadId || undefined,
+          salesId,
+          name: storeName.trim(),
+          ownerName: (ownerName || 'Pemilik Toko').trim(),
+          phone: cleanPhone,
+          address: address ? address.trim() : 'Alamat Operasional',
+          monthlyFee: planConfig.price,
+          license: {
+            create: {
+              licenseKey,
+              status: LicenseStatus.ACTIVE,
+            },
+          },
+        },
+        include: { license: true },
+      });
+
+      // 3. Terbitkan invoice perdana di ProtekSales
+      const invDate = new Date();
+      const invoiceNumber = `INV-${invDate.getFullYear()}${String(invDate.getMonth() + 1).padStart(2, '0')}-${protekOutlet.id.slice(0, 4).toUpperCase()}`;
+      await prisma.invoice.create({
+        data: {
+          outletId: protekOutlet.id,
+          invoiceNumber,
+          amount: planConfig.price,
+          billingPeriod: `${invDate.getFullYear()}-${String(invDate.getMonth() + 1).padStart(2, '0')}`,
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          status: 'PAID',
+          paidAt: new Date(),
+        },
+      });
+
+      // 4. Update status lead menjadi DEAL jika leadId ada atau phone cocok
+      if (leadId) {
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: {
+            status: LeadStatus.DEAL,
+          },
+        }).catch(() => {});
+      } else {
+        await prisma.lead.updateMany({
+          where: { phone: cleanPhone, salesId },
+          data: {
+            status: LeadStatus.DEAL,
+          },
+        }).catch(() => {});
+      }
+
+      return sendSuccess(res, `Sistem Cloud POS untuk "${storeName}" berhasil dibuat otomatis oleh Antigravity!`, {
+        tenant: {
+          id: tenantResult.tenant.id,
+          name: tenantResult.tenant.name,
+          slug: tenantResult.tenant.slug,
+          domain: tenantResult.tenant.customDomain,
+          webUrl: `https://${tenantResult.tenant.slug}.vimtk.cloud`,
+          licenseKey,
+          plan: planConfig.name,
+          monthlyFee: planConfig.price,
+        },
+        credentials: {
+          username: username.trim(),
+          password,
+          loginUrl: `https://${tenantResult.tenant.slug}.vimtk.cloud`,
+        },
+        protekOutletId: protekOutlet.id,
+      }, 201);
     } catch (error) {
       next(error);
     }
