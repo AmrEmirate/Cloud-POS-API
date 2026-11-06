@@ -147,8 +147,22 @@ export class LicenseService {
     targetStatus: LicenseStatus,
     reason?: string
   ) {
+    const existingLicense = await prisma.license.findFirst({
+      where: {
+        OR: [
+          { id: licenseId },
+          { licenseKey: licenseId },
+          { outletId: licenseId },
+        ],
+      },
+    });
+
+    if (!existingLicense) {
+      throw new Error(`Lisensi dengan referensi "${licenseId}" tidak ditemukan.`);
+    }
+
     const updatedLicense = await prisma.license.update({
-      where: { id: licenseId },
+      where: { id: existingLicense.id },
       data: {
         status: targetStatus,
         suspendedReason: targetStatus === LicenseStatus.SUSPENDED ? (reason || 'Dinonaktifkan oleh Admin.') : null,

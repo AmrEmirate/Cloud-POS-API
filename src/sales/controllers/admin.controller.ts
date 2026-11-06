@@ -354,6 +354,7 @@ export class AdminController {
                 id: matchingOutlet.id,
                 name: matchingOutlet.name,
                 salesName: matchingOutlet.sales?.name,
+                licenseId: matchingOutlet.license?.id,
                 licenseKey: matchingOutlet.license?.licenseKey,
                 licenseStatus: matchingOutlet.license?.status,
               }
