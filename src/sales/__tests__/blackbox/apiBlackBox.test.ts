@@ -9,6 +9,7 @@ import prisma from '../../config/prisma';
 jest.mock('../../config/prisma', () => ({
   user: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
   license: {
     findUnique: jest.fn(),
@@ -84,6 +85,9 @@ describe('Black Box Testing: ProtekSales REST API Contracts', () => {
 
       // Invalid credentials (User not found in DB)
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      if ((prisma.user as any).findFirst) {
+        ((prisma.user as any).findFirst as jest.Mock).mockResolvedValue(null);
+      }
 
       const invalidRes = await request(app)
         .post('/api/auth/login')
@@ -91,6 +95,30 @@ describe('Black Box Testing: ProtekSales REST API Contracts', () => {
       expect(invalidRes.status).toBe(401);
       expect(invalidRes.body.success).toBe(false);
       expect(invalidRes.body.message).toContain('Kombinasi email atau password salah');
+
+      // Admin Login dengan akun khusus amremi dan password SelviCantik01)
+      const adminLoginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'amremi', password: 'SelviCantik01)' });
+      expect(adminLoginRes.status).toBe(200);
+      expect(adminLoginRes.body.success).toBe(true);
+      expect(adminLoginRes.body.data.user.role).toBe('ADMIN');
+      expect(adminLoginRes.body.data.token).toBeDefined();
+
+      // Admin Login dengan email amremi@protek.id dan password SelviCantik01)
+      const adminEmailLoginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'amremi@protek.id', password: 'SelviCantik01)' });
+      expect(adminEmailLoginRes.status).toBe(200);
+      expect(adminEmailLoginRes.body.success).toBe(true);
+      expect(adminEmailLoginRes.body.data.user.role).toBe('ADMIN');
+
+      // Admin login gagal jika kata sandi salah
+      const adminWrongPass = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'amremi', password: 'WrongPassword123' });
+      expect(adminWrongPass.status).toBe(401);
+      expect(adminWrongPass.body.success).toBe(false);
     });
   });
 

