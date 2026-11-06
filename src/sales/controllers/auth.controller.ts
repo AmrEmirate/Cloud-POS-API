@@ -15,8 +15,25 @@ export class AuthController {
         return sendError(res, 'Nama, email, password, dan nomor telepon wajib diisi.', 400);
       }
 
+      const cleanEmail = email.toLowerCase().trim();
+
+      // Kebijakan Sistem: Hanya diperbolehkan 1 akun Admin tunggal di seluruh platform (amremi).
+      // Akun Mitra Sales diperbolehkan banyak (unlimited).
+      if (
+        role === 'ADMIN' ||
+        cleanEmail === 'amremi' ||
+        cleanEmail === 'amremi@protek.id' ||
+        cleanEmail === 'admin@protek.id'
+      ) {
+        return sendError(
+          res,
+          'Sistem dibatasi hanya untuk 1 Akun Admin Utama (amremi). Pendaftaran akun Admin baru dinonaktifkan.',
+          403
+        );
+      }
+
       const existingUser = await prisma.user.findUnique({
-        where: { email: email.toLowerCase() },
+        where: { email: cleanEmail },
       });
 
       if (existingUser) {
@@ -26,13 +43,14 @@ export class AuthController {
       const hashedPassword = await bcrypt.hash(password, 10);
       const cleanPhone = sanitizePhoneNumber(phone);
 
+      // Seluruh akun baru yang didaftarkan berstatus Mitra Sales
       const user = await prisma.user.create({
         data: {
           name,
-          email: email.toLowerCase(),
+          email: cleanEmail,
           password: hashedPassword,
           phone: cleanPhone,
-          role: role === 'ADMIN' ? 'ADMIN' : 'SALES',
+          role: 'SALES',
           commissionRate: commissionRate ? parseFloat(commissionRate) : 25.0,
         },
         select: {
@@ -52,7 +70,7 @@ export class AuthController {
         role: user.role,
       });
 
-      return sendSuccess(res, 'Registrasi berhasil.', { user, token }, 201);
+      return sendSuccess(res, 'Registrasi berhasil sebagai Mitra Sales.', { user, token }, 201);
     } catch (error) {
       next(error);
     }

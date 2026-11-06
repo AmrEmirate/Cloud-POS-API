@@ -50,6 +50,7 @@ export class LeadService {
             id: true,
             name: true,
             phone: true,
+            role: true,
           },
         },
       },
@@ -57,10 +58,14 @@ export class LeadService {
 
     if (activeLead) {
       const isOwnedByCurrentSales = currentSalesId && activeLead.salesId === currentSalesId;
+      const isAdminDirect = activeLead.sales.role === 'ADMIN';
+
       return {
         canClaim: isOwnedByCurrentSales ? true : false,
         message: isOwnedByCurrentSales
           ? 'Outlet ini sudah Anda klaim sebelumnya dan masa proteksi masih aktif.'
+          : isAdminDirect
+          ? 'Outlet ini merupakan binaan langsung Admin HQ (amremi). Terproteksi penuh oleh pusat.'
           : `Outlet sedang diprospek oleh ${activeLead.sales.name}. Terkunci hingga ${activeLead.protectedUntil.toLocaleDateString('id-ID')}.`,
         lead: activeLead,
       };

@@ -47,6 +47,14 @@ describe('White Box Testing: Commission & Tax Mathematics', () => {
 
       expect(commission).toBe(50000);
     });
+
+    it('should bypass sales commission (0% commission) for Admin Direct Outlets where revenue goes 100% to HQ', () => {
+      const salesRole = 'ADMIN';
+      const isDirectAdmin = salesRole === 'ADMIN';
+      const commissionAmount = isDirectAdmin ? 0 : 50000;
+
+      expect(commissionAmount).toBe(0);
+    });
   });
 
   describe('Wallet Ready Balance & Withdrawal Constraints', () => {

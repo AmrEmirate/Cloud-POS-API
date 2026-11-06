@@ -34,7 +34,7 @@ export class OutletController {
         include: {
           license: true,
           sales: {
-            select: { id: true, name: true, phone: true },
+            select: { id: true, name: true, phone: true, role: true, email: true },
           },
           invoices: {
             orderBy: { dueDate: 'desc' },
@@ -64,6 +64,8 @@ export class OutletController {
           }
         }
 
+        const isDirectAdmin = outlet.sales?.role === 'ADMIN' || outlet.sales?.email?.includes('amremi');
+
         return {
           id: outlet.id,
           name: outlet.name,
@@ -74,6 +76,8 @@ export class OutletController {
           longitude: outlet.longitude,
           monthlyFee: outlet.monthlyFee,
           sales: outlet.sales,
+          isDirectAdmin,
+          salesChannel: isDirectAdmin ? 'HQ_DIRECT' : 'SALES_PARTNER',
           license: outlet.license,
           latestInvoice,
           paymentIndicator,
@@ -193,8 +197,9 @@ export class OutletController {
       const userRole = req.user!.role;
       const { leadId, name, ownerName, phone, address, latitude, longitude, monthlyFee, salesId, planCode, packageTier } = req.body;
 
-      // Assign sales: jika admin membuatkan untuk sales tertentu, gunakan salesId dari body
-      const assignedSalesId = userRole === 'ADMIN' && salesId ? salesId : currentSalesId;
+      // Assign sales: jika admin membuatkan untuk sales tertentu, gunakan salesId dari body.
+      // Jika dibuat langsung oleh Admin HQ (amremi) tanpa memilih mitra sales, outlet secara mutlak menjadi Binaan Langsung Admin HQ.
+      const assignedSalesId = userRole === 'ADMIN' && salesId && salesId !== 'ADMIN_DIRECT' ? salesId : currentSalesId;
       const cleanPhone = sanitizePhoneNumber(phone);
 
       if (!name || !ownerName || !cleanPhone || !address) {

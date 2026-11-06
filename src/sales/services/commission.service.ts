@@ -33,6 +33,13 @@ export class CommissionService {
     }
 
     const sales = invoice.outlet.sales;
+
+    // Outlet Binaan Langsung Admin HQ:
+    // Pendapatan langganan 100% masuk ke kas pusat Admin tanpa potongan komisi mitra sales pihak ketiga
+    if (sales.role === 'ADMIN' || sales.email?.toLowerCase().includes('amremi')) {
+      return null;
+    }
+
     const percentage = sales.commissionRate || config.defaultCommissionPercentage;
     const amount = (invoice.amount * percentage) / 100;
 

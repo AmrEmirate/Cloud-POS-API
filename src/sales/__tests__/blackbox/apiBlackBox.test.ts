@@ -10,6 +10,7 @@ jest.mock('../../config/prisma', () => ({
   user: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    create: jest.fn(),
   },
   license: {
     findUnique: jest.fn(),
@@ -119,6 +120,58 @@ describe('Black Box Testing: ProtekSales REST API Contracts', () => {
         .send({ email: 'amremi', password: 'WrongPassword123' });
       expect(adminWrongPass.status).toBe(401);
       expect(adminWrongPass.body.success).toBe(false);
+    });
+
+    it('Endpoint: POST /api/auth/register single-admin policy enforcement', async () => {
+      // 1. Ditolak jika mendaftar role ADMIN
+      const adminRegAttempt = await request(app)
+        .post('/api/auth/register')
+        .send({
+          name: 'Fake Admin',
+          email: 'fakeadmin@protek.id',
+          password: 'Password123!',
+          phone: '08123456789',
+          role: 'ADMIN',
+        });
+      expect(adminRegAttempt.status).toBe(403);
+      expect(adminRegAttempt.body.success).toBe(false);
+      expect(adminRegAttempt.body.message).toContain('1 Akun Admin Utama (amremi)');
+
+      // 2. Ditolak jika mendaftar dengan identitas amremi
+      const amremiRegAttempt = await request(app)
+        .post('/api/auth/register')
+        .send({
+          name: 'Amremi Clon',
+          email: 'amremi@protek.id',
+          password: 'Password123!',
+          phone: '08123456789',
+        });
+      expect(amremiRegAttempt.status).toBe(403);
+      expect(amremiRegAttempt.body.success).toBe(false);
+
+      // 3. Diizinkan mendaftarkan banyak akun Mitra Sales
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.user.create as jest.Mock).mockResolvedValue({
+        id: 'new-sales-uuid-1',
+        name: 'Mitra Sales Baru',
+        email: 'salesbaru@protek.id',
+        phone: '6281299998888',
+        role: 'SALES',
+        commissionRate: 25.0,
+        createdAt: new Date(),
+      });
+
+      const salesRegSuccess = await request(app)
+        .post('/api/auth/register')
+        .send({
+          name: 'Mitra Sales Baru',
+          email: 'salesbaru@protek.id',
+          password: 'Password123!',
+          phone: '081299998888',
+        });
+      expect(salesRegSuccess.status).toBe(201);
+      expect(salesRegSuccess.body.success).toBe(true);
+      expect(salesRegSuccess.body.data.user.role).toBe('SALES');
     });
   });
 
