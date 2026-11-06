@@ -60,6 +60,8 @@ export class CloudPosIntegrationService {
     themeColor?: string;
     themeConfig?: any;
     customDomain?: string;
+    ownerUsername?: string;
+    ownerPassword?: string;
   }) {
     try {
       // In-Memory direct provisioning

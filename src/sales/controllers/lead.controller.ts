@@ -34,7 +34,21 @@ export class LeadController {
   static async checkIn(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const salesId = req.user!.userId;
-      const { storeName, ownerName, phone, address, latitude, longitude, notes, photoUrl } = req.body;
+      const {
+        storeName,
+        ownerName,
+        phone,
+        address,
+        latitude,
+        longitude,
+        notes,
+        photoUrl,
+        salesType,
+        outletCount,
+        outcome,
+        rejectionReason,
+        followUpDate,
+      } = req.body;
 
       if (!storeName || !ownerName || !phone || !address) {
         return sendError(res, 'Nama toko, nama pemilik, nomor WA, dan alamat wajib diisi.', 400);
@@ -50,6 +64,11 @@ export class LeadController {
         longitude: longitude ? parseFloat(longitude) : undefined,
         notes,
         photoUrl,
+        salesType,
+        outletCount: outletCount ? parseInt(outletCount, 10) : undefined,
+        outcome,
+        rejectionReason,
+        followUpDate,
       });
 
       return sendSuccess(res, 'Check-in kunjungan dan proteksi prospek berhasil dicatat.', result, 201);

@@ -74,6 +74,7 @@ export class LeadService {
 
   /**
    * Form Check-in Kunjungan: Daftarkan prospek baru atau kunjungan toko bebas
+   * Mendukung Alur Sales Offline (Lapangan) & Sales Online (Multi-Outlet Outreach)
    */
   static async registerOrCheckinLead(data: {
     salesId: string;
@@ -85,6 +86,11 @@ export class LeadService {
     longitude?: number;
     notes?: string;
     photoUrl?: string;
+    salesType?: 'OFFLINE' | 'ONLINE';
+    outletCount?: number;
+    outcome?: 'AGREED' | 'NOT_AGREED' | 'PENDING' | 'FOLLOW_UP';
+    rejectionReason?: string;
+    followUpDate?: string;
   }) {
     const cleanPhone = sanitizePhoneNumber(data.phone);
     const availability = await this.checkLeadAvailability(cleanPhone, data.salesId);
@@ -96,6 +102,31 @@ export class LeadService {
     const now = new Date();
     const protectedUntil = new Date(now.getTime() + config.leadProtectionDays * 24 * 60 * 60 * 1000);
 
+    // Format catatan terstruktur
+    const salesTypeTag = data.salesType ? `[Channel: ${data.salesType}]` : '[Channel: OFFLINE]';
+    const outletTag = data.outletCount ? `[Outlets: ${data.outletCount}]` : '';
+    const outcomeTag = data.outcome ? `[Hasil: ${data.outcome}]` : '';
+    const reasonTag = data.rejectionReason ? `[Alasan: ${data.rejectionReason}]` : '';
+    const followUpTag = data.followUpDate ? `[Pengingat: ${data.followUpDate}]` : '';
+
+    const formattedNotes = [
+      salesTypeTag,
+      outletTag,
+      outcomeTag,
+      reasonTag,
+      followUpTag,
+      data.notes || '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    // Tentukan status awal berdasarkan kesepakatan UMKM
+    let initialStatus: LeadStatus = LeadStatus.NEW;
+    if (data.outcome === 'AGREED') {
+      initialStatus = LeadStatus.DEMO; // Siap dibuatkan UI kustom / demo
+    }
+
     // Jika toko sudah dipegang oleh sales yang sama, tambahkan riwayat kunjungan
     if (availability.lead && availability.lead.sales.id === data.salesId) {
       const updatedLead = await prisma.lead.update({
@@ -106,7 +137,8 @@ export class LeadService {
           address: data.address,
           latitude: data.latitude,
           longitude: data.longitude,
-          notes: data.notes,
+          notes: formattedNotes,
+          status: initialStatus,
           // Perpanjang masa proteksi 30 hari lagi dari check-in baru
           protectedUntil,
         },
@@ -116,7 +148,7 @@ export class LeadService {
         data: {
           leadId: updatedLead.id,
           salesId: data.salesId,
-          notes: data.notes || 'Kunjungan lanjutan prospek.',
+          notes: formattedNotes || 'Kunjungan lanjutan prospek.',
           photoUrl: data.photoUrl,
           statusAtVisit: updatedLead.status,
         },
@@ -135,8 +167,8 @@ export class LeadService {
         address: data.address,
         latitude: data.latitude,
         longitude: data.longitude,
-        notes: data.notes,
-        status: LeadStatus.NEW,
+        notes: formattedNotes,
+        status: initialStatus,
         protectedUntil,
       },
     });
@@ -145,9 +177,9 @@ export class LeadService {
       data: {
         leadId: newLead.id,
         salesId: data.salesId,
-        notes: data.notes || 'Check-in kunjungan baru.',
+        notes: formattedNotes || 'Check-in kunjungan baru.',
         photoUrl: data.photoUrl,
-        statusAtVisit: LeadStatus.NEW,
+        statusAtVisit: initialStatus,
       },
     });
 
