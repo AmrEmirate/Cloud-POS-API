@@ -40,6 +40,9 @@ router.get('/ui-designs', AdminController.getAllUiDesigns);
 // 9. Integrasi & Monitoring Cloud POS Engine
 router.get('/cloudpos/health', AdminController.getCloudPosHealth);
 router.get('/cloudpos/tenants', AdminController.getCloudPosTenants);
+router.post('/cloudpos/tenants', AdminController.createCloudPosTenant);
+router.put('/cloudpos/tenants/:id', AdminController.updateCloudPosTenant);
+router.delete('/cloudpos/tenants/:id', AdminController.deleteCloudPosTenant);
 router.post('/cloudpos/sync-tenants', AdminController.syncCloudPosTenants);
 router.get('/cloudpos/analytics', AdminController.getCloudPosAnalytics);
 

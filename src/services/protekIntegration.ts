@@ -370,7 +370,19 @@ export class ProtekIntegrationService {
     const tenants = await basePrisma.tenant.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        outlets: { select: { id: true, name: true, phone: true } },
+        outlets: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            city: true,
+            address: true,
+            phone: true,
+            plan: true,
+            dailyTxLimit: true,
+            targetDailySales: true,
+          },
+        },
         _count: {
           select: {
             users: true,
@@ -386,7 +398,16 @@ export class ProtekIntegrationService {
 
     const summaries = await Promise.all(
       tenants.map(async (t) => {
-        const [totalOrders, todayOrders, totalGmvAgg, todayGmvAgg, lastOrder] = await Promise.all([
+        const [
+          totalOrders,
+          todayOrders,
+          totalGmvAgg,
+          todayGmvAgg,
+          lastOrder,
+          ownerUser,
+          latestInvoice,
+          activeUsers,
+        ] = await Promise.all([
           basePrisma.order.count({ where: { tenantId: t.id, status: 'PAID' } }),
           basePrisma.order.count({
             where: { tenantId: t.id, status: 'PAID', createdAt: { gte: startOfToday } },
@@ -404,9 +425,29 @@ export class ProtekIntegrationService {
             orderBy: { createdAt: 'desc' },
             select: { createdAt: true },
           }),
+          basePrisma.user.findFirst({
+            where: { tenantId: t.id, role: Role.OWNER },
+            select: { id: true, name: true, username: true },
+          }),
+          basePrisma.subscriptionInvoice.findFirst({
+            where: { tenantId: t.id, status: 'PAID' },
+            orderBy: { paidAt: 'desc' },
+          }),
+          basePrisma.user.findMany({
+            where: { tenantId: t.id },
+            select: { id: true, name: true, username: true, role: true },
+          }),
         ]);
 
         const plan = getPlanDetails(t.plan);
+        const mainOutlet = t.outlets[0] || null;
+
+        // Cluster location: dari city & address outlet utama riil
+        const clusterLocation = mainOutlet
+          ? (mainOutlet.city && mainOutlet.address
+              ? `${mainOutlet.city} (${mainOutlet.address})`
+              : mainOutlet.city || mainOutlet.address || 'Indonesia')
+          : 'Pusat';
 
         return {
           id: t.id,
@@ -414,21 +455,45 @@ export class ProtekIntegrationService {
           slug: t.slug,
           customDomain: t.customDomain,
           themeColor: t.themeColor,
+          themeConfig: t.themeConfig,
           plan: t.plan,
           planName: plan.name,
+          planDescription: plan.description,
           status: t.status,
           licenseKey: t.licenseKey,
           pricePerOutlet: Number(t.pricePerOutlet),
+          maxOutlets: t.maxOutlets || 5,
+          usedOutlets: t._count.outlets,
+          activePosCount: activeUsers.length || t._count.users || 1,
           subscriptionExpiresAt: t.subscriptionExpiresAt,
           outletsCount: t._count.outlets,
-          usersCount: t._count.users,
+          usersCount: activeUsers.length || t._count.users || 1,
           menusCount: t._count.menus,
           totalOrders,
           todayOrders,
           totalGmv: Number(totalGmvAgg._sum?.total || 0),
           todayGmv: Number(todayGmvAgg._sum?.total || 0),
           lastOrderAt: lastOrder?.createdAt || null,
-          mainOutlet: t.outlets[0] || null,
+          mainOutlet,
+          outlets: t.outlets,
+          ownerName: ownerUser?.name || t.bankAccountName || 'Owner Toko',
+          ownerUsername: ownerUser?.username || 'owner',
+          ownerPhone: mainOutlet?.phone || '081284525304',
+          ownerEmail: `${t.slug}@vimtk.cloud`,
+          cluster: clusterLocation,
+          bank: {
+            bankName: t.bankName,
+            bankAccountNumber: t.bankAccountNumber,
+            bankAccountName: t.bankAccountName,
+          },
+          latestInvoice: latestInvoice
+            ? {
+                invoiceNumber: latestInvoice.invoiceNumber,
+                amount: Number(latestInvoice.amount),
+                paidAt: latestInvoice.paidAt,
+                description: latestInvoice.description,
+              }
+            : null,
           createdAt: t.createdAt,
         };
       })
