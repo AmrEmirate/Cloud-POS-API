@@ -32,3 +32,16 @@ export function isValidIndonesianMobilePhone(phone: string): boolean {
   // Nomor seluler Indonesia 628xx biasanya 10 s/d 14 digit
   return /^628[0-9]{8,12}$/.test(sanitized);
 }
+
+/**
+ * Menyembunyikan/menyamarkan digit tengah nomor telepon untuk privasi (contoh: 0812****5304)
+ */
+export function maskPhoneNumber(phone?: string): string {
+  if (!phone) return '-';
+  const digits = phone.replace(/[^0-9]/g, '');
+  if (digits.length <= 6) return '****';
+  const prefix = digits.slice(0, 4);
+  const suffix = digits.slice(-4);
+  return `${prefix}****${suffix}`;
+}
+

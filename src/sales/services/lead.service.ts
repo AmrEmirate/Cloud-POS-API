@@ -1,6 +1,6 @@
 import prisma from '../config/prisma';
 import { LeadStatus } from '../constants/enums';
-import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
+import { sanitizePhoneNumber, maskPhoneNumber } from '../utils/phoneSanitizer';
 import { config } from '../config/env';
 
 export interface CheckLeadResult {
@@ -59,6 +59,16 @@ export class LeadService {
       const isOwnedByCurrentSales = currentSalesId && existingOutlet.salesId === currentSalesId;
       const isAdminDirect = existingOutlet.sales.role === 'ADMIN';
 
+      // Sembunyikan nomor telepon jika bukan pemilik langsung (privasi klien resmi)
+      const sanitizedOutlet = {
+        ...existingOutlet,
+        phone: isOwnedByCurrentSales ? existingOutlet.phone : maskPhoneNumber(existingOutlet.phone),
+        sales: {
+          ...existingOutlet.sales,
+          phone: isOwnedByCurrentSales ? existingOutlet.sales.phone : maskPhoneNumber(existingOutlet.sales.phone),
+        },
+      };
+
       return {
         canClaim: false,
         message: isOwnedByCurrentSales
@@ -66,7 +76,7 @@ export class LeadService {
           : isAdminDirect
           ? `Outlet "${existingOutlet.name}" merupakan merchant resmi binaan langsung Admin HQ (amremi). Terproteksi penuh.`
           : `Outlet "${existingOutlet.name}" sudah menjadi merchant resmi binaan ${existingOutlet.sales.name}. Terproteksi penuh.`,
-        outlet: existingOutlet,
+        outlet: sanitizedOutlet,
       };
     }
 
@@ -97,6 +107,16 @@ export class LeadService {
       const isOwnedByCurrentSales = currentSalesId && activeLead.salesId === currentSalesId;
       const isAdminDirect = activeLead.sales.role === 'ADMIN';
 
+      // Sembunyikan nomor telepon prospek jika sedang diklaim sales lain
+      const sanitizedLead = {
+        ...activeLead,
+        phone: isOwnedByCurrentSales ? activeLead.phone : maskPhoneNumber(activeLead.phone),
+        sales: {
+          ...activeLead.sales,
+          phone: isOwnedByCurrentSales ? activeLead.sales.phone : maskPhoneNumber(activeLead.sales.phone),
+        },
+      };
+
       return {
         canClaim: isOwnedByCurrentSales ? true : false,
         message: isOwnedByCurrentSales
@@ -104,7 +124,7 @@ export class LeadService {
           : isAdminDirect
           ? 'Outlet ini merupakan binaan langsung Admin HQ (amremi). Terproteksi penuh oleh pusat.'
           : `Outlet sedang diprospek oleh ${activeLead.sales.name}. Terkunci hingga ${activeLead.protectedUntil.toLocaleDateString('id-ID')}.`,
-        lead: activeLead,
+        lead: sanitizedLead,
       };
     }
 

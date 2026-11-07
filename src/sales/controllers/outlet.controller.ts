@@ -3,9 +3,10 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import prisma from '../config/prisma';
 import { InvoiceStatus, LicenseStatus, LeadStatus } from '../constants/enums';
 import { sendSuccess, sendError } from '../utils/response';
-import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
+import { sanitizePhoneNumber, maskPhoneNumber } from '../utils/phoneSanitizer';
 import { getPackageByCodeOrFee } from '../constants/plans';
 import { CloudPosIntegrationService } from '../services/cloudPosIntegration';
+import { basePrisma } from '../../config/database';
 
 export class OutletController {
   /**
@@ -48,6 +49,37 @@ export class OutletController {
       const now = new Date();
       const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
+      // Kumpulkan licenseKey untuk mengambil data cabang riil dari tenant
+      const licenseKeys = outlets
+        .map((o) => o.license?.licenseKey)
+        .filter((key): key is string => !!key);
+
+      let branchesMap: Record<string, any[]> = {};
+      if (licenseKeys.length > 0) {
+        const tenants = await basePrisma.tenant.findMany({
+          where: { licenseKey: { in: licenseKeys } },
+          select: {
+            licenseKey: true,
+            outlets: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                city: true,
+                address: true,
+                phone: true,
+              },
+              orderBy: { code: 'asc' },
+            },
+          },
+        });
+        tenants.forEach((t) => {
+          if (t.licenseKey) {
+            branchesMap[t.licenseKey] = t.outlets;
+          }
+        });
+      }
+
       const formattedOutlets = outlets.map((outlet) => {
         const latestInvoice = outlet.invoices[0] || null;
         let paymentIndicator: 'PAID' | 'DUE_SOON' | 'OVERDUE' | 'NO_INVOICE' = 'NO_INVOICE';
@@ -65,22 +97,36 @@ export class OutletController {
         }
 
         const isDirectAdmin = outlet.sales?.role === 'ADMIN' || outlet.sales?.email?.includes('amremi');
+        const isOwner = userRole === 'ADMIN' || outlet.salesId === salesId;
+
+        const licenseKey = outlet.license?.licenseKey;
+        const rawBranches = (licenseKey && branchesMap[licenseKey]) ? branchesMap[licenseKey] : [];
+        const branches = isOwner
+          ? rawBranches
+          : rawBranches.map((b) => ({ ...b, phone: maskPhoneNumber(b.phone) }));
 
         return {
           id: outlet.id,
           name: outlet.name,
           ownerName: outlet.ownerName,
-          phone: outlet.phone,
+          phone: isOwner ? outlet.phone : maskPhoneNumber(outlet.phone),
           address: outlet.address,
           latitude: outlet.latitude,
           longitude: outlet.longitude,
           monthlyFee: outlet.monthlyFee,
-          sales: outlet.sales,
+          sales: outlet.sales
+            ? {
+                ...outlet.sales,
+                phone: isOwner ? outlet.sales.phone : maskPhoneNumber(outlet.sales.phone),
+              }
+            : null,
           isDirectAdmin,
           salesChannel: isDirectAdmin ? 'HQ_DIRECT' : 'SALES_PARTNER',
           license: outlet.license,
           latestInvoice,
           paymentIndicator,
+          branches,
+          canToggleKillSwitch: userRole === 'ADMIN',
         };
       });
 
@@ -125,9 +171,7 @@ export class OutletController {
         return sendError(res, 'Outlet tidak ditemukan.', 404);
       }
 
-      if (userRole !== 'ADMIN' && outlet.salesId !== salesId) {
-        return sendError(res, 'Anda tidak memiliki akses ke data outlet ini.', 403);
-      }
+      const isOwner = userRole === 'ADMIN' || outlet.salesId === salesId;
 
       // Ambil data operasional live dari Cloud POS BE jika lisensi tersedia
       let cloudPosOperational = null;
@@ -135,8 +179,30 @@ export class OutletController {
         cloudPosOperational = await CloudPosIntegrationService.getTenantByLicense(outlet.license.licenseKey);
       }
 
-      return sendSuccess(res, 'Detail outlet berhasil diambil.', {
+      // Jika sales melihat outlet yang bukan miliknya, samarkan nomor kontak
+      const sanitizedOutlet = {
         ...outlet,
+        phone: isOwner ? outlet.phone : maskPhoneNumber(outlet.phone),
+        sales: outlet.sales
+          ? {
+              ...outlet.sales,
+              phone: isOwner ? outlet.sales.phone : maskPhoneNumber(outlet.sales.phone),
+            }
+          : null,
+        canToggleKillSwitch: userRole === 'ADMIN',
+      };
+
+      if (!isOwner && cloudPosOperational) {
+        if (Array.isArray(cloudPosOperational.outlets)) {
+          cloudPosOperational.outlets = cloudPosOperational.outlets.map((b: any) => ({
+            ...b,
+            phone: maskPhoneNumber(b.phone),
+          }));
+        }
+      }
+
+      return sendSuccess(res, 'Detail outlet berhasil diambil.', {
+        ...sanitizedOutlet,
         cloudPosOperational,
       });
     } catch (error) {
@@ -163,24 +229,33 @@ export class OutletController {
         return sendError(res, 'Outlet tidak ditemukan.', 404);
       }
 
-      if (userRole !== 'ADMIN' && outlet.salesId !== salesId) {
-        return sendError(res, 'Anda tidak memiliki akses ke data outlet ini.', 403);
-      }
-
       if (!outlet.license?.licenseKey) {
         return sendSuccess(res, 'Outlet belum memiliki lisensi POS yang terdaftar.', {
           connected: false,
           licenseKey: null,
           data: null,
+          canToggleKillSwitch: userRole === 'ADMIN',
         });
       }
 
-      const liveData = await CloudPosIntegrationService.getTenantByLicense(outlet.license.licenseKey);
+      let liveData = await CloudPosIntegrationService.getTenantByLicense(outlet.license.licenseKey);
+      if (liveData && userRole !== 'ADMIN' && outlet.salesId !== salesId) {
+        if (Array.isArray(liveData.outlets)) {
+          liveData = {
+            ...liveData,
+            outlets: liveData.outlets.map((b: any) => ({
+              ...b,
+              phone: maskPhoneNumber(b.phone),
+            })),
+          };
+        }
+      }
 
       return sendSuccess(res, 'Data operasional live Cloud POS berhasil diambil.', {
         connected: !!liveData,
         licenseKey: outlet.license.licenseKey,
         data: liveData,
+        canToggleKillSwitch: userRole === 'ADMIN',
       });
     } catch (error) {
       next(error);

@@ -5,7 +5,7 @@ import { LeadService } from '../services/lead.service';
 import { sendSuccess, sendError } from '../utils/response';
 import prisma from '../config/prisma';
 import { LeadStatus, LicenseStatus } from '../constants/enums';
-import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
+import { sanitizePhoneNumber, maskPhoneNumber } from '../utils/phoneSanitizer';
 import { basePrisma } from '../../config/database';
 import { getPlanDetails } from '../../config/plans';
 import { Role as BaseRole } from '@prisma/client';
@@ -138,7 +138,53 @@ export class LeadController {
         },
       });
 
-      return sendSuccess(res, 'Daftar prospek berhasil diambil.', leads);
+      // Kumpulkan licenseKey untuk mengambil data cabang riil dari tenant
+      const licenseKeys = leads
+        .map((l) => l.outlet?.license?.licenseKey)
+        .filter((key): key is string => !!key);
+
+      let branchesMap: Record<string, any[]> = {};
+      if (licenseKeys.length > 0) {
+        const tenants = await basePrisma.tenant.findMany({
+          where: { licenseKey: { in: licenseKeys } },
+          select: {
+            licenseKey: true,
+            outlets: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                city: true,
+                address: true,
+                phone: true,
+              },
+              orderBy: { code: 'asc' },
+            },
+          },
+        });
+        tenants.forEach((t) => {
+          if (t.licenseKey) {
+            branchesMap[t.licenseKey] = t.outlets;
+          }
+        });
+      }
+
+      const formattedLeads = leads.map((lead) => {
+        const isOwner = userRole === 'ADMIN' || lead.salesId === salesId;
+        const licenseKey = lead.outlet?.license?.licenseKey;
+        const rawBranches = (licenseKey && branchesMap[licenseKey]) ? branchesMap[licenseKey] : [];
+        const branches = isOwner
+          ? rawBranches
+          : rawBranches.map((b) => ({ ...b, phone: maskPhoneNumber(b.phone) }));
+
+        return {
+          ...lead,
+          phone: isOwner ? lead.phone : maskPhoneNumber(lead.phone),
+          branches,
+        };
+      });
+
+      return sendSuccess(res, 'Daftar prospek berhasil diambil.', formattedLeads);
     } catch (error) {
       next(error);
     }
