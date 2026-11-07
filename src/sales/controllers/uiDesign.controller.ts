@@ -232,12 +232,14 @@ export class UiDesignController {
 
       // Hitung Biaya Langganan Bulanan Berdasarkan Paket & Jumlah Outlet
       const baseMonthlyFee =
-        planCode === 'PAKET_100K'
+        planCode === 'PAKET_50K'
+          ? 50000
+          : planCode === 'PAKET_100K'
           ? 100000
           : planCode === 'PAKET_200K'
           ? 200000
-          : planCode === 'PAKET_250K'
-          ? 250000
+          : planCode === 'PAKET_CUSTOM' || planCode === 'PAKET_250K'
+          ? 0
           : 150000;
       const totalMonthlyFee = baseMonthlyFee * Math.max(1, Number(outletCount) || 1);
 
