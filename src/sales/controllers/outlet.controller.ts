@@ -16,9 +16,9 @@ export class OutletController {
     try {
       const salesId = req.user!.userId;
       const userRole = req.user!.role;
-      const { search } = req.query;
+      const { search, scope } = req.query;
 
-      const whereClause: any = userRole === 'ADMIN' ? {} : { salesId };
+      const whereClause: any = userRole === 'ADMIN' || scope === 'all' ? {} : { salesId };
 
       if (search && typeof search === 'string') {
         const cleanSearch = sanitizePhoneNumber(search);

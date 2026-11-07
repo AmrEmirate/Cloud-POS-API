@@ -88,9 +88,11 @@ export class LeadController {
   static async getMyLeads(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const salesId = req.user!.userId;
-      const { status, search } = req.query;
+      const userRole = req.user!.role;
+      const { status, search, scope } = req.query;
 
-      const whereClause: any = { salesId };
+      // Jika scope === 'all' atau user role ADMIN, tampilkan seluruh prospek dan outlet yang terproteksi/approved di sistem
+      const whereClause: any = userRole === 'ADMIN' || scope === 'all' ? {} : { salesId };
 
       if (status && typeof status === 'string') {
         whereClause.status = status as LeadStatus;
@@ -109,6 +111,13 @@ export class LeadController {
         where: whereClause,
         orderBy: { updatedAt: 'desc' },
         include: {
+          sales: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+            },
+          },
           visits: {
             orderBy: { visitDate: 'desc' },
             take: 1,
@@ -117,6 +126,7 @@ export class LeadController {
             select: {
               id: true,
               name: true,
+              monthlyFee: true,
               license: {
                 select: {
                   status: true,

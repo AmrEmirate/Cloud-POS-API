@@ -6,6 +6,7 @@ import { config } from '../config/env';
 export interface CheckLeadResult {
   canClaim: boolean;
   message: string;
+  outlet?: any;
   lead?: {
     id: string;
     storeName: string;
@@ -33,7 +34,43 @@ export class LeadService {
 
     const now = new Date();
 
-    // Cari prospek aktif yang nomor teleponnya sama dan masa proteksi belum habis
+    // 1. Cek apakah outlet sudah aktif berlangganan (Approved / Deal)
+    const existingOutlet = await prisma.outlet.findFirst({
+      where: {
+        OR: [
+          { phone: cleanPhone },
+          { phone: { contains: cleanPhone.slice(-9) } },
+        ],
+      },
+      include: {
+        sales: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            role: true,
+          },
+        },
+        license: true,
+      },
+    });
+
+    if (existingOutlet) {
+      const isOwnedByCurrentSales = currentSalesId && existingOutlet.salesId === currentSalesId;
+      const isAdminDirect = existingOutlet.sales.role === 'ADMIN';
+
+      return {
+        canClaim: false,
+        message: isOwnedByCurrentSales
+          ? `Outlet "${existingOutlet.name}" sudah menjadi klien aktif Anda (Approved / Lunas).`
+          : isAdminDirect
+          ? `Outlet "${existingOutlet.name}" merupakan merchant resmi binaan langsung Admin HQ (amremi). Terproteksi penuh.`
+          : `Outlet "${existingOutlet.name}" sudah menjadi merchant resmi binaan ${existingOutlet.sales.name}. Terproteksi penuh.`,
+        outlet: existingOutlet,
+      };
+    }
+
+    // 2. Cari prospek aktif yang nomor teleponnya sama dan masa proteksi belum habis
     const activeLead = await prisma.lead.findFirst({
       where: {
         phone: cleanPhone,
