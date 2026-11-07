@@ -11,6 +11,7 @@ generator client {
 enum Role {
   ADMIN
   SALES
+  ORGANISASI
 }
 
 enum LeadStatus {
@@ -62,18 +63,21 @@ model User {
   commissionRate    Float          @default(20.0)
   orgCommissionRate Float          @default(10.0)
   organizationName  String?
+  organizationId    String?
   bankName          String?
   bankAccountNumber String?
   bankAccountHolder String?
   npwp              String?
-  tier              String         @default("Silver") // Silver, Gold, Platinum
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
+  organization      User?          @relation("OrgMembers", fields: [organizationId], references: [id], onDelete: SetNull)
+  salesMembers      User[]         @relation("OrgMembers")
   leads             Lead[]         @relation("SalesLeads")
   visits            VisitLog[]     @relation("SalesVisits")
   outlets           Outlet[]       @relation("SalesOutlets")
   commissions       Commission[]   @relation("SalesCommissions")
+  orgCommissions    Commission[]   @relation("OrgCommissions")
   withdrawals       Withdrawal[]   @relation("SalesWithdrawals")
   disputesClaimed   DisputeClaim[] @relation("ClaimantSales")
   uiRequests        UiDesignRequest[] @relation("SalesUiRequests")
@@ -214,6 +218,7 @@ model Invoice {
 model Commission {
   id            String           @id @default(uuid())
   salesId       String
+  orgId         String?
   invoiceId     String           @unique
   invoiceAmount Float
   percentage    Float
@@ -221,13 +226,16 @@ model Commission {
   orgPercentage Float            @default(10.0)
   orgAmount     Float            @default(0.0)
   status        CommissionStatus @default(READY)
+  orgStatus     String           @default("READY")
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   sales         User             @relation("SalesCommissions", fields: [salesId], references: [id], onDelete: Cascade)
+  organization  User?            @relation("OrgCommissions", fields: [orgId], references: [id], onDelete: SetNull)
   invoice       Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([salesId])
+  @@index([orgId])
   @@index([status])
   @@map("commissions")
 }

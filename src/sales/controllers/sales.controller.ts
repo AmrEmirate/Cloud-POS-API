@@ -16,7 +16,6 @@ export class SalesController {
         select: {
           id: true,
           name: true,
-          tier: true,
           outlets: {
             select: { id: true },
           },
@@ -35,12 +34,11 @@ export class SalesController {
         .map((s) => {
           const totalDeals = s.leads.length;
           const totalOutlets = s.outlets.length;
-          const totalCommissionEarned = s.commissions.reduce((acc, curr) => acc + curr.amount, 0);
+          const totalCommissionEarned = s.commissions.reduce((acc: number, curr: { amount: number }) => acc + curr.amount, 0);
 
           return {
             salesId: s.id,
             name: s.name,
-            tier: s.tier,
             totalDeals,
             totalOutlets,
             totalCommissionEarned,

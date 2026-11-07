@@ -40,14 +40,30 @@ export class CommissionService {
       return null;
     }
 
-    const percentage = sales.commissionRate ?? config.defaultCommissionPercentage;
-    const orgPercentage = (sales as any).orgCommissionRate ?? config.defaultOrgCommissionPercentage;
+    // Sales Net 20% flat (net tidak ada peringkat)
+    const percentage = 20.0;
     const amount = (invoice.amount * percentage) / 100;
-    const orgAmount = (invoice.amount * orgPercentage) / 100;
+
+    // Organisasi 10% net (hanya jika sales berasal dari organisasi tersebut)
+    let orgId: string | null = null;
+    let orgPercentage = 0.0;
+    let orgAmount = 0.0;
+
+    if (sales.organizationId) {
+      const orgUser = await prisma.user.findUnique({
+        where: { id: sales.organizationId },
+      });
+      if (orgUser && orgUser.role === 'ORGANISASI') {
+        orgId = orgUser.id;
+        orgPercentage = 10.0;
+        orgAmount = (invoice.amount * orgPercentage) / 100;
+      }
+    }
 
     const commission = await prisma.commission.create({
       data: {
         salesId: sales.id,
+        orgId,
         invoiceId: invoice.id,
         invoiceAmount: invoice.amount,
         percentage,
@@ -55,6 +71,7 @@ export class CommissionService {
         orgPercentage,
         orgAmount,
         status: CommissionStatus.READY,
+        orgStatus: orgId ? 'READY' : 'NONE',
       },
     });
 
@@ -62,29 +79,110 @@ export class CommissionService {
   }
 
   /**
-   * Mengambil ringkasan saldo dompet komisi sales
+   * Mengambil ringkasan saldo dompet komisi sales atau organisasi
    */
-  static async getSalesWalletSummary(salesId: string) {
+  static async getSalesWalletSummary(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new Error('User tidak ditemukan.');
+    }
+
+    // Role ORGANISASI: Menarik hak bagi hasil 10% dari sales-sales binaannya
+    if (user.role === 'ORGANISASI') {
+      const readyOrgCommissions = await prisma.commission.aggregate({
+        where: {
+          orgId: userId,
+          orgStatus: 'READY',
+        },
+        _sum: {
+          orgAmount: true,
+        },
+      });
+
+      const pendingWithdrawals = await prisma.withdrawal.aggregate({
+        where: {
+          salesId: userId,
+          status: WithdrawalStatus.PENDING,
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+
+      const completedWithdrawals = await prisma.withdrawal.aggregate({
+        where: {
+          salesId: userId,
+          status: WithdrawalStatus.COMPLETED,
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+
+      // Potensi komisi organisasi dari outlet binaan sales yang belum bayar
+      const salesMembers = await prisma.user.findMany({
+        where: { organizationId: userId },
+        select: { id: true },
+      });
+      const memberIds = salesMembers.map((m) => m.id);
+
+      let pendingPotentialOrgCommission = 0;
+      if (memberIds.length > 0) {
+        const unpaidInvoices = await prisma.invoice.findMany({
+          where: {
+            outlet: {
+              salesId: { in: memberIds },
+            },
+            status: {
+              in: [InvoiceStatus.UNPAID, InvoiceStatus.OVERDUE],
+            },
+          },
+        });
+        pendingPotentialOrgCommission = unpaidInvoices.reduce(
+          (acc, inv) => acc + (inv.amount * 10.0) / 100,
+          0
+        );
+      }
+
+      const totalReady = readyOrgCommissions._sum.orgAmount || 0;
+      const totalPendingWithdrawal = pendingWithdrawals._sum.amount || 0;
+      const availableToWithdraw = Math.max(0, totalReady - totalPendingWithdrawal);
+
+      return {
+        role: 'ORGANISASI',
+        readyBalance: availableToWithdraw,
+        totalEarnedReady: totalReady,
+        orgReadyBalance: totalReady,
+        pendingCommission: pendingPotentialOrgCommission,
+        pendingOrgCommission: pendingPotentialOrgCommission,
+        pendingWithdrawalAmount: totalPendingWithdrawal,
+        totalWithdrawn: completedWithdrawals._sum.amount || 0,
+        minimumWithdrawal: config.minimumWithdrawalAmount,
+        salesCommissionRate: 0.0,
+        orgCommissionRate: 10.0,
+        organizationName: user.name,
+      };
+    }
+
+    // Role SALES: Hak komisi 20% net dari outlet binaan sendiri
     // 1. Total Komisi Siap Ditarik (READY)
     const readyCommissions = await prisma.commission.aggregate({
       where: {
-        salesId,
+        salesId: userId,
         status: CommissionStatus.READY,
       },
       _sum: {
         amount: true,
-        orgAmount: true,
       },
-    });
-
-    const user = await prisma.user.findUnique({
-      where: { id: salesId },
     });
 
     // 2. Total Komisi Sedang Diajukan Penarikan (PENDING withdrawal)
     const pendingWithdrawals = await prisma.withdrawal.aggregate({
       where: {
-        salesId,
+        salesId: userId,
         status: WithdrawalStatus.PENDING,
       },
       _sum: {
@@ -95,7 +193,7 @@ export class CommissionService {
     // 3. Total Komisi Sudah Ditarik (COMPLETED withdrawal)
     const completedWithdrawals = await prisma.withdrawal.aggregate({
       where: {
-        salesId,
+        salesId: userId,
         status: WithdrawalStatus.COMPLETED,
       },
       _sum: {
@@ -107,47 +205,36 @@ export class CommissionService {
     const unpaidInvoices = await prisma.invoice.findMany({
       where: {
         outlet: {
-          salesId,
+          salesId: userId,
         },
         status: {
           in: [InvoiceStatus.UNPAID, InvoiceStatus.OVERDUE],
         },
       },
-      include: {
-        outlet: {
-          include: {
-            sales: true,
-          },
-        },
-      },
     });
 
-    let pendingPotentialCommission = 0;
-    let pendingPotentialOrgCommission = 0;
-    for (const inv of unpaidInvoices) {
-      const rate = inv.outlet.sales.commissionRate ?? config.defaultCommissionPercentage;
-      const orgRate = (inv.outlet.sales as any).orgCommissionRate ?? config.defaultOrgCommissionPercentage;
-      pendingPotentialCommission += (inv.amount * rate) / 100;
-      pendingPotentialOrgCommission += (inv.amount * orgRate) / 100;
-    }
+    const pendingPotentialCommission = unpaidInvoices.reduce(
+      (acc, inv) => acc + (inv.amount * 20.0) / 100,
+      0
+    );
 
     const totalReady = readyCommissions._sum.amount || 0;
-    const totalOrgReady = (readyCommissions._sum as any).orgAmount || 0;
     const totalPendingWithdrawal = pendingWithdrawals._sum.amount || 0;
     const availableToWithdraw = Math.max(0, totalReady - totalPendingWithdrawal);
 
     return {
+      role: 'SALES',
       readyBalance: availableToWithdraw,
       totalEarnedReady: totalReady,
-      orgReadyBalance: totalOrgReady,
+      orgReadyBalance: 0,
       pendingCommission: pendingPotentialCommission,
-      pendingOrgCommission: pendingPotentialOrgCommission,
+      pendingOrgCommission: 0,
       pendingWithdrawalAmount: totalPendingWithdrawal,
       totalWithdrawn: completedWithdrawals._sum.amount || 0,
       minimumWithdrawal: config.minimumWithdrawalAmount,
-      salesCommissionRate: user?.commissionRate ?? config.defaultCommissionPercentage,
-      orgCommissionRate: (user as any)?.orgCommissionRate ?? config.defaultOrgCommissionPercentage,
-      organizationName: (user as any)?.organizationName ?? null,
+      salesCommissionRate: 20.0,
+      orgCommissionRate: user.organizationId ? 10.0 : 0.0,
+      organizationName: user.organizationName ?? null,
     };
   }
 

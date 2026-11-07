@@ -116,6 +116,56 @@ export class LeadController {
         ];
       }
 
+      // Auto-sinkronisasi: Pastikan semua outlet resmi di prisma.outlet memiliki record Lead (status DEAL)
+      try {
+        const orphanOutlets = await prisma.outlet.findMany({
+          where: { leadId: null },
+          include: { sales: true, license: true },
+        });
+
+        for (const orphan of orphanOutlets) {
+          const cleanOrphanPhone = sanitizePhoneNumber(orphan.phone) || orphan.phone;
+          let targetLead = await prisma.lead.findFirst({
+            where: {
+              OR: [
+                { phone: cleanOrphanPhone },
+                { phone: orphan.phone },
+              ],
+            },
+          });
+
+          if (!targetLead) {
+            targetLead = await prisma.lead.create({
+              data: {
+                salesId: orphan.salesId,
+                storeName: orphan.name,
+                ownerName: orphan.ownerName,
+                phone: cleanOrphanPhone,
+                address: orphan.address,
+                status: LeadStatus.DEAL,
+                protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                notes: `[Channel: OFFLINE] Terverifikasi Resmi & Aktif Cloud POS (${orphan.license?.licenseKey || 'LISENSI-AKTIF'})`,
+              },
+            });
+          } else if (targetLead.status !== LeadStatus.DEAL) {
+            targetLead = await prisma.lead.update({
+              where: { id: targetLead.id },
+              data: {
+                status: LeadStatus.DEAL,
+                protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              },
+            });
+          }
+
+          await prisma.outlet.update({
+            where: { id: orphan.id },
+            data: { leadId: targetLead.id },
+          }).catch(() => {});
+        }
+      } catch (syncErr) {
+        // non-blocking
+      }
+
       const leads = await prisma.lead.findMany({
         where: whereClause,
         orderBy: { updatedAt: 'desc' },
@@ -474,33 +524,71 @@ export class LeadController {
           amount: planConfig.price,
           billingPeriod: `${invDate.getFullYear()}-${String(invDate.getMonth() + 1).padStart(2, '0')}`,
           dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          status: 'PAID',
-          paidAt: new Date(),
+          status: 'UNPAID',
+          paidAt: null,
         },
       });
 
-      // Proses perhitungan komisi 20% untuk sales jika invoice perdana lunas
-      try {
-        await CommissionService.processInvoiceCommission(firstInvoice.id);
-      } catch (e) {
-        // non-blocking jika invoice komisi sudah tercatat
-      }
+      // Invoice berstatus UNPAID sampai UMKM bayar dan Admin approve pembayaran.
+      // Komisi 20% sales & 10% organisasi TIDAK AKAN cair sebelum pembayaran di-approve Admin.
 
-      // 4. Update status lead menjadi DEAL jika leadId ada atau phone cocok
-      if (leadId) {
-        await prisma.lead.update({
-          where: { id: leadId },
-          data: {
-            status: LeadStatus.DEAL,
-          },
-        }).catch(() => {});
-      } else {
-        await prisma.lead.updateMany({
-          where: { phone: cleanPhone, salesId },
-          data: {
-            status: LeadStatus.DEAL,
-          },
-        }).catch(() => {});
+      // 4. Pastikan status lead menjadi DEAL dan terhubung ke outlet
+      let resolvedLeadId = leadId;
+      try {
+        if (resolvedLeadId) {
+          await prisma.lead.update({
+            where: { id: resolvedLeadId },
+            data: {
+              status: LeadStatus.DEAL,
+              protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            },
+          });
+        } else {
+          // Cari lead berdasarkan nomor telepon
+          let matchedLead = await prisma.lead.findFirst({
+            where: {
+              OR: [
+                { phone: cleanPhone },
+                { phone: phone ? phone.trim() : cleanPhone },
+              ],
+            },
+          });
+
+          if (matchedLead) {
+            resolvedLeadId = matchedLead.id;
+            await prisma.lead.update({
+              where: { id: matchedLead.id },
+              data: {
+                status: LeadStatus.DEAL,
+                salesId,
+                protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              },
+            });
+          } else {
+            const newDealLead = await prisma.lead.create({
+              data: {
+                salesId,
+                storeName: storeName.trim(),
+                ownerName: (ownerName || 'Pemilik Usaha').trim(),
+                phone: cleanPhone,
+                address: address ? address.trim() : 'Alamat Operasional',
+                notes: `[Channel: OFFLINE] Terverifikasi Resmi & Aktif Cloud POS (${cleanSlug}.vimtk.cloud)`,
+                status: LeadStatus.DEAL,
+                protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              },
+            });
+            resolvedLeadId = newDealLead.id;
+          }
+        }
+
+        if (resolvedLeadId && protekOutlet) {
+          await prisma.outlet.update({
+            where: { id: protekOutlet.id },
+            data: { leadId: resolvedLeadId },
+          }).catch(() => {});
+        }
+      } catch (leadSyncErr) {
+        console.error('Lead sync error on tenant provisioning:', leadSyncErr);
       }
 
       return sendSuccess(res, `Sistem Cloud POS untuk "${storeName}" berhasil dibuat otomatis oleh Antigravity!`, {

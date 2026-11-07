@@ -19,7 +19,19 @@ export class OutletController {
       const userRole = req.user!.role;
       const { search, scope } = req.query;
 
-      const whereClause: any = userRole === 'ADMIN' || scope === 'all' ? {} : { salesId };
+      let whereClause: any = {};
+      if (userRole === 'ADMIN' || scope === 'all') {
+        whereClause = {};
+      } else if (userRole === 'ORGANISASI') {
+        const memberSales = await prisma.user.findMany({
+          where: { organizationId: salesId },
+          select: { id: true },
+        });
+        const memberIds = memberSales.map((m) => m.id);
+        whereClause = { salesId: { in: memberIds } };
+      } else {
+        whereClause = { salesId };
+      }
 
       if (search && typeof search === 'string') {
         const cleanSearch = sanitizePhoneNumber(search);
@@ -45,7 +57,7 @@ export class OutletController {
         orderBy: { createdAt: 'desc' },
       });
 
-      // Format dengan indikator status pembayaran (Lunas, H-3 Jatuh Tempo, Menunggak)
+      // Format dengan indikator status pembayaran (Lunas, H-3 Jatuh Tempo, Menunggak, Belum Bayar)
       const now = new Date();
       const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
@@ -82,7 +94,7 @@ export class OutletController {
 
       const formattedOutlets = outlets.map((outlet) => {
         const latestInvoice = outlet.invoices[0] || null;
-        let paymentIndicator: 'PAID' | 'DUE_SOON' | 'OVERDUE' | 'NO_INVOICE' = 'NO_INVOICE';
+        let paymentIndicator: 'PAID' | 'DUE_SOON' | 'OVERDUE' | 'UNPAID' | 'NO_INVOICE' = 'NO_INVOICE';
 
         if (latestInvoice) {
           if (latestInvoice.status === InvoiceStatus.PAID) {
@@ -92,7 +104,7 @@ export class OutletController {
           } else if (latestInvoice.dueDate <= threeDaysFromNow) {
             paymentIndicator = 'DUE_SOON';
           } else {
-            paymentIndicator = 'PAID'; // Masih dalam periode normal
+            paymentIndicator = 'UNPAID';
           }
         }
 

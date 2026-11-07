@@ -141,22 +141,40 @@ export class AdminController {
         },
       });
 
-      // Jika completed atau approved, update status komisi sales terkait menjadi WITHDRAWN
+      // Jika completed atau approved, update status komisi sales/organisasi terkait menjadi WITHDRAWN
       if (finalStatus === WithdrawalStatus.COMPLETED) {
-        // Ambil komisi-komisi READY milik sales tersebut hingga mencukupi amount withdrawal
-        const readyCommissions = await prisma.commission.findMany({
-          where: { salesId: withdrawal.salesId, status: CommissionStatus.READY },
-          orderBy: { createdAt: 'asc' },
-        });
-
-        let remainingToDeduct = withdrawal.amount;
-        for (const comm of readyCommissions) {
-          if (remainingToDeduct <= 0) break;
-          await prisma.commission.update({
-            where: { id: comm.id },
-            data: { status: CommissionStatus.WITHDRAWN },
+        const user = await prisma.user.findUnique({ where: { id: withdrawal.salesId } });
+        if (user?.role === 'ORGANISASI') {
+          const readyOrgCommissions = await prisma.commission.findMany({
+            where: { orgId: withdrawal.salesId, orgStatus: 'READY' },
+            orderBy: { createdAt: 'asc' },
           });
-          remainingToDeduct -= comm.amount;
+
+          let remainingToDeduct = withdrawal.amount;
+          for (const comm of readyOrgCommissions) {
+            if (remainingToDeduct <= 0) break;
+            await prisma.commission.update({
+              where: { id: comm.id },
+              data: { orgStatus: 'WITHDRAWN' },
+            });
+            remainingToDeduct -= comm.orgAmount;
+          }
+        } else {
+          // Ambil komisi-komisi READY milik sales tersebut hingga mencukupi amount withdrawal
+          const readyCommissions = await prisma.commission.findMany({
+            where: { salesId: withdrawal.salesId, status: CommissionStatus.READY },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          let remainingToDeduct = withdrawal.amount;
+          for (const comm of readyCommissions) {
+            if (remainingToDeduct <= 0) break;
+            await prisma.commission.update({
+              where: { id: comm.id },
+              data: { status: CommissionStatus.WITHDRAWN },
+            });
+            remainingToDeduct -= comm.amount;
+          }
         }
       }
 
@@ -1013,7 +1031,6 @@ export class AdminController {
           commissionRate: parsedCommissionRate,
           orgCommissionRate: parsedOrgCommissionRate,
           organizationName: organizationName?.trim() || null,
-          tier: validTier,
           bankName: bankName?.trim() || null,
           bankAccountNumber: bankAccountNumber?.trim() || null,
           bankAccountHolder: bankAccountHolder?.trim() || null,
@@ -1028,7 +1045,6 @@ export class AdminController {
           commissionRate: true,
           orgCommissionRate: true,
           organizationName: true,
-          tier: true,
           bankName: true,
           bankAccountNumber: true,
           bankAccountHolder: true,
