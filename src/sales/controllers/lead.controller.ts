@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { LeadService } from '../services/lead.service';
+import { CommissionService } from '../services/commission.service';
 import { sendSuccess, sendError } from '../utils/response';
 import prisma from '../config/prisma';
 import { LeadStatus, LicenseStatus } from '../constants/enums';
@@ -466,7 +467,7 @@ export class LeadController {
       // 3. Terbitkan invoice perdana di ProtekSales
       const invDate = new Date();
       const invoiceNumber = `INV-${invDate.getFullYear()}${String(invDate.getMonth() + 1).padStart(2, '0')}-${protekOutlet.id.slice(0, 4).toUpperCase()}`;
-      await prisma.invoice.create({
+      const firstInvoice = await prisma.invoice.create({
         data: {
           outletId: protekOutlet.id,
           invoiceNumber,
@@ -477,6 +478,13 @@ export class LeadController {
           paidAt: new Date(),
         },
       });
+
+      // Proses perhitungan komisi 20% untuk sales jika invoice perdana lunas
+      try {
+        await CommissionService.processInvoiceCommission(firstInvoice.id);
+      } catch (e) {
+        // non-blocking jika invoice komisi sudah tercatat
+      }
 
       // 4. Update status lead menjadi DEAL jika leadId ada atau phone cocok
       if (leadId) {
