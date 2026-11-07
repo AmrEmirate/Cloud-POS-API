@@ -114,6 +114,8 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
         pricePerOutlet: Number(tenant.pricePerOutlet),
         currentOutletsCount: tenant.outlets.length,
         maxOutlets: tenant.maxOutlets,
+        totalMonthlyBill: Number(tenant.pricePerOutlet) * Math.max(1, tenant.outlets.length || tenant.maxOutlets || 1),
+        hasAllBranchesView: true,
         canAddOutlet: tenant.outlets.length < tenant.maxOutlets,
         dailyTxLimitPerOutlet: tenant.dailyTxLimitPerOutlet,
         monthlyTxLimitPerOutlet: currentPlan.monthlyTxLimit,
@@ -223,10 +225,11 @@ export const createCheckout = async (req: AuthRequest, res: Response) => {
         amount = effectivePrice * 1 * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
       } else {
-        const totalOutlets = Math.max(1, tenant.maxOutlets || 1);
+        const registeredCount = await basePrisma.outlet.count({ where: { tenantId: tenant.id } });
+        const totalOutlets = Math.max(1, registeredCount || tenant.maxOutlets || 1);
         outletCount = totalOutlets;
         amount = effectivePrice * totalOutlets * m;
-        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang Operasional + 1 Akses Semua Cabang) x ${m} Bulan`;
       }
 
       metadata.months = m;
@@ -463,10 +466,11 @@ export const submitManualPayment = async (req: AuthRequest, res: Response) => {
         amount = effectivePrice * 1 * m;
         description = `Perpanjangan Langganan Paket ${planInfo.name} [Cabang: ${targetOutletName}] x ${m} Bulan`;
       } else {
-        const totalOutlets = Math.max(1, tenant.maxOutlets || 1);
+        const registeredCount = await basePrisma.outlet.count({ where: { tenantId: tenant.id } });
+        const totalOutlets = Math.max(1, registeredCount || tenant.maxOutlets || 1);
         outletCount = totalOutlets;
         amount = effectivePrice * totalOutlets * m;
-        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang) x ${m} Bulan`;
+        description = `Perpanjangan Langganan Paket ${planInfo.name} (${totalOutlets} Cabang Operasional + 1 Akses Semua Cabang) x ${m} Bulan`;
       }
 
       metadata.months = m;

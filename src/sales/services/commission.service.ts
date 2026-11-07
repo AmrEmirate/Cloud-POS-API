@@ -40,8 +40,10 @@ export class CommissionService {
       return null;
     }
 
-    const percentage = sales.commissionRate || config.defaultCommissionPercentage;
+    const percentage = sales.commissionRate ?? config.defaultCommissionPercentage;
+    const orgPercentage = (sales as any).orgCommissionRate ?? config.defaultOrgCommissionPercentage;
     const amount = (invoice.amount * percentage) / 100;
+    const orgAmount = (invoice.amount * orgPercentage) / 100;
 
     const commission = await prisma.commission.create({
       data: {
@@ -50,6 +52,8 @@ export class CommissionService {
         invoiceAmount: invoice.amount,
         percentage,
         amount,
+        orgPercentage,
+        orgAmount,
         status: CommissionStatus.READY,
       },
     });
@@ -69,7 +73,12 @@ export class CommissionService {
       },
       _sum: {
         amount: true,
+        orgAmount: true,
       },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { id: salesId },
     });
 
     // 2. Total Komisi Sedang Diajukan Penarikan (PENDING withdrawal)
@@ -114,22 +123,31 @@ export class CommissionService {
     });
 
     let pendingPotentialCommission = 0;
+    let pendingPotentialOrgCommission = 0;
     for (const inv of unpaidInvoices) {
-      const rate = inv.outlet.sales.commissionRate || config.defaultCommissionPercentage;
+      const rate = inv.outlet.sales.commissionRate ?? config.defaultCommissionPercentage;
+      const orgRate = (inv.outlet.sales as any).orgCommissionRate ?? config.defaultOrgCommissionPercentage;
       pendingPotentialCommission += (inv.amount * rate) / 100;
+      pendingPotentialOrgCommission += (inv.amount * orgRate) / 100;
     }
 
     const totalReady = readyCommissions._sum.amount || 0;
+    const totalOrgReady = (readyCommissions._sum as any).orgAmount || 0;
     const totalPendingWithdrawal = pendingWithdrawals._sum.amount || 0;
     const availableToWithdraw = Math.max(0, totalReady - totalPendingWithdrawal);
 
     return {
       readyBalance: availableToWithdraw,
       totalEarnedReady: totalReady,
+      orgReadyBalance: totalOrgReady,
       pendingCommission: pendingPotentialCommission,
+      pendingOrgCommission: pendingPotentialOrgCommission,
       pendingWithdrawalAmount: totalPendingWithdrawal,
       totalWithdrawn: completedWithdrawals._sum.amount || 0,
       minimumWithdrawal: config.minimumWithdrawalAmount,
+      salesCommissionRate: user?.commissionRate ?? config.defaultCommissionPercentage,
+      orgCommissionRate: (user as any)?.orgCommissionRate ?? config.defaultOrgCommissionPercentage,
+      organizationName: (user as any)?.organizationName ?? null,
     };
   }
 

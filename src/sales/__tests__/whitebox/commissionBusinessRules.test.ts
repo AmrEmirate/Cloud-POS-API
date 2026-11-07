@@ -40,12 +40,32 @@ describe('White Box Testing: Commission & Tax Mathematics', () => {
       expect(commission).toBe(75000);
     });
 
-    it('should fallback to default commission percentage (25%) when sales rate is null', () => {
+    it('should fallback to default commission percentage (20% Sales + 10% Organization) when sales rate is null', () => {
       const invoiceAmount = 200000; // Paket Pro Rp 200.000
-      const rate = config.defaultCommissionPercentage; // 25%
+      const rate = config.defaultCommissionPercentage; // 20%
+      const orgRate = config.defaultOrgCommissionPercentage; // 10%
       const commission = (invoiceAmount * rate) / 100;
+      const orgCommission = (invoiceAmount * orgRate) / 100;
 
-      expect(commission).toBe(50000);
+      expect(rate).toBe(20);
+      expect(orgRate).toBe(10);
+      expect(commission).toBe(40000);
+      expect(orgCommission).toBe(20000);
+      expect(invoiceAmount - commission - orgCommission).toBe(140000);
+    });
+
+    it('should calculate 4 operational branches x Rp 100.000 = Rp 400.000 with 20% Sales (Rp 80.000) & 10% Organization (Rp 40.000)', () => {
+      const branches = 4;
+      const pricePerBranch = 100000;
+      const monthlyBill = branches * pricePerBranch;
+      const salesShare = (monthlyBill * 20) / 100;
+      const orgShare = (monthlyBill * 10) / 100;
+      const hqShare = monthlyBill - salesShare - orgShare;
+
+      expect(monthlyBill).toBe(400000);
+      expect(salesShare).toBe(80000);
+      expect(orgShare).toBe(40000);
+      expect(hqShare).toBe(280000);
     });
 
     it('should bypass sales commission (0% commission) for Admin Direct Outlets where revenue goes 100% to HQ', () => {

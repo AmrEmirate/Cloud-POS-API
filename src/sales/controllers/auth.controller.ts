@@ -9,7 +9,7 @@ import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
 export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
     try {
-      const { name, email, password, phone, role, commissionRate } = req.body;
+      const { name, email, password, phone, role, commissionRate, orgCommissionRate, organizationName } = req.body;
 
       if (!name || !email || !password || !phone) {
         return sendError(res, 'Nama, email, password, dan nomor telepon wajib diisi.', 400);
@@ -51,7 +51,9 @@ export class AuthController {
           password: hashedPassword,
           phone: cleanPhone,
           role: 'SALES',
-          commissionRate: commissionRate ? parseFloat(commissionRate) : 25.0,
+          commissionRate: commissionRate !== undefined ? parseFloat(commissionRate) : 20.0,
+          orgCommissionRate: orgCommissionRate !== undefined ? parseFloat(orgCommissionRate) : 10.0,
+          organizationName: organizationName ? String(organizationName).trim() : null,
         },
         select: {
           id: true,
@@ -60,6 +62,8 @@ export class AuthController {
           phone: true,
           role: true,
           commissionRate: true,
+          orgCommissionRate: true,
+          organizationName: true,
           createdAt: true,
         },
       });
@@ -132,7 +136,9 @@ export class AuthController {
             email: adminEmail,
             phone: adminUser?.phone || '6281234567890',
             role: 'ADMIN',
-            commissionRate: adminUser?.commissionRate ?? 0,
+            commissionRate: adminUser?.commissionRate ?? 20,
+            orgCommissionRate: adminUser?.orgCommissionRate ?? 10,
+            organizationName: adminUser?.organizationName ?? null,
             bankName: adminUser?.bankName ?? null,
             bankAccountNumber: adminUser?.bankAccountNumber ?? null,
             bankAccountHolder: adminUser?.bankAccountHolder ?? null,
@@ -177,7 +183,9 @@ export class AuthController {
           email: user.email,
           phone: user.phone,
           role: user.role,
-          commissionRate: user.commissionRate,
+          commissionRate: user.commissionRate ?? 20,
+          orgCommissionRate: user.orgCommissionRate ?? 10,
+          organizationName: user.organizationName ?? null,
           bankName: user.bankName,
           bankAccountNumber: user.bankAccountNumber,
           bankAccountHolder: user.bankAccountHolder,
@@ -201,6 +209,8 @@ export class AuthController {
           phone: true,
           role: true,
           commissionRate: true,
+          orgCommissionRate: true,
+          organizationName: true,
           bankName: true,
           bankAccountNumber: true,
           bankAccountHolder: true,

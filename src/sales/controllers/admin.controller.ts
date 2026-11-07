@@ -295,6 +295,8 @@ export class AdminController {
           email: true,
           phone: true,
           commissionRate: true,
+          orgCommissionRate: true,
+          organizationName: true,
           bankName: true,
           bankAccountNumber: true,
           bankAccountHolder: true,
@@ -389,8 +391,8 @@ export class AdminController {
         name,
         slug: rawSlug,
         customDomain,
-        plan = 'GROWTH',
-        maxOutlets = 5,
+        plan = 'PAKET_100K',
+        maxOutlets = 4,
         pricePerOutlet,
         ownerName = 'Pemilik Bisnis',
         ownerEmail,
@@ -564,10 +566,20 @@ export class AdminController {
             pricePerOutlet: pricePerOutlet !== undefined ? Number(pricePerOutlet) : planConfig.price,
             dailyTxLimitPerOutlet: planConfig.dailyTxLimit,
           }),
+          ...(pricePerOutlet !== undefined && !planConfig && {
+            pricePerOutlet: Number(pricePerOutlet),
+          }),
           ...(maxOutlets !== undefined && { maxOutlets: Number(maxOutlets) }),
           ...(status && { status }),
         },
       });
+
+      const activeOutletsCount = await basePrisma.outlet.count({
+        where: { tenantId: existingTenant.id },
+      });
+      const billableOutletsCount = Math.max(1, activeOutletsCount || updatedTenant.maxOutlets || 1);
+      const effectivePricePerOutlet = Number(updatedTenant.pricePerOutlet) || 100000;
+      const totalMonthlyBill = effectivePricePerOutlet * billableOutletsCount;
 
       // Update owner name jika diubah
       if (ownerName) {
@@ -584,6 +596,22 @@ export class AdminController {
           data: {
             plan: planConfig.code,
             dailyTxLimit: planConfig.dailyTxLimit || 200,
+          },
+        });
+      }
+
+      // Sinkronkan juga tagihan langganan di Cloud POS agar nominalnya sesuai (Cabang x Harga/Cabang)
+      const latestSubInv = await basePrisma.subscriptionInvoice.findFirst({
+        where: { tenantId: existingTenant.id, status: 'PAID' },
+        orderBy: { paidAt: 'desc' },
+      });
+      if (latestSubInv && (planConfig || pricePerOutlet !== undefined || maxOutlets !== undefined)) {
+        const currentPlanInfo = getPlanDetails(updatedTenant.plan);
+        await basePrisma.subscriptionInvoice.update({
+          where: { id: latestSubInv.id },
+          data: {
+            amount: totalMonthlyBill,
+            description: `${currentPlanInfo.name} (${currentPlanInfo.description}) - ${billableOutletsCount} Cabang Operasional (+1 Akses Semua Cabang) x Rp ${effectivePricePerOutlet.toLocaleString('id-ID')}`,
           },
         });
       }
@@ -606,15 +634,20 @@ export class AdminController {
             });
           }
 
-          if (name || pricePerOutlet || ownerName || phone) {
+          if (name || pricePerOutlet !== undefined || planConfig || maxOutlets !== undefined || ownerName || phone) {
             await prisma.outlet.update({
               where: { id: protekLicense.outletId },
               data: {
                 ...(name && { name: name.trim() }),
-                ...(pricePerOutlet && { monthlyFee: Number(pricePerOutlet) }),
+                monthlyFee: totalMonthlyBill,
                 ...(ownerName && { ownerName: ownerName.trim() }),
                 ...(phone && { phone: phone.trim() }),
               },
+            });
+
+            await prisma.invoice.updateMany({
+              where: { outletId: protekLicense.outletId },
+              data: { amount: totalMonthlyBill },
             });
           }
         }
@@ -689,6 +722,10 @@ export class AdminController {
       for (const tenant of cloudTenants) {
         if (!tenant.licenseKey) continue;
 
+        const billableOutlets = Math.max(1, Number(tenant.usedOutlets || tenant.outletsCount || tenant.maxOutlets || 1));
+        const unitPrice = tenant.pricePerOutlet ? Number(tenant.pricePerOutlet) : 100000;
+        const totalMonthlyFee = unitPrice * billableOutlets;
+
         if (existingLicenseMap.has(tenant.licenseKey)) {
           alreadyLinkedCount++;
           // Sinkronkan data outlet ProtekSales agar selalu up to date dengan Cloud POS DB
@@ -701,8 +738,12 @@ export class AdminController {
                 ownerName: tenant.ownerName || 'Ibu Intan Permata (Owner)',
                 phone: tenant.ownerPhone || tenant.mainOutlet?.phone || '081284525304',
                 address: tenant.cluster || tenant.mainOutlet?.address || 'Bandung',
-                monthlyFee: tenant.pricePerOutlet ? Number(tenant.pricePerOutlet) : 350000,
+                monthlyFee: totalMonthlyFee,
               },
+            });
+            await prisma.invoice.updateMany({
+              where: { outletId: existingLic.outletId },
+              data: { amount: totalMonthlyFee },
             });
           }
           continue;
@@ -716,7 +757,7 @@ export class AdminController {
             ownerName: tenant.ownerName || 'Ibu Intan Permata (Owner)',
             phone: tenant.ownerPhone || tenant.mainOutlet?.phone || '081284525304',
             address: tenant.cluster || tenant.mainOutlet?.address || 'Bandung',
-            monthlyFee: tenant.pricePerOutlet ? parseFloat(tenant.pricePerOutlet) : 350000,
+            monthlyFee: totalMonthlyFee,
             license: {
               create: {
                 licenseKey: tenant.licenseKey,
@@ -769,65 +810,115 @@ export class AdminController {
   }
 
   /**
-   * 12. Atur Persentase Komisi Sales Khusus (Misal: 20%, 25%, dsb.)
+   * 12. Atur Persentase Komisi Sales & Organisasi Khusus (Misal: Sales 20%, Organisasi 10%)
    * PATCH /api/admin/sales/:id/commission-rate
    */
   static async updateSalesCommissionRate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const id = req.params.id as string;
-      const { commissionRate } = req.body;
+      const { commissionRate, orgCommissionRate, organizationName } = req.body;
 
       if (commissionRate === undefined || isNaN(Number(commissionRate))) {
-        return sendError(res, 'Nilai persentase komisi (commissionRate) harus berupa angka valid.', 400);
+        return sendError(res, 'Nilai persentase komisi sales (commissionRate) harus berupa angka valid.', 400);
       }
 
       const rate = parseFloat(commissionRate);
       if (rate < 0 || rate > 100) {
-        return sendError(res, 'Persentase komisi harus di antara 0% dan 100%.', 400);
+        return sendError(res, 'Persentase komisi sales harus di antara 0% dan 100%.', 400);
+      }
+
+      let orgRate: number | undefined;
+      if (orgCommissionRate !== undefined && !isNaN(Number(orgCommissionRate))) {
+        orgRate = parseFloat(orgCommissionRate);
+        if (orgRate < 0 || orgRate > 100) {
+          return sendError(res, 'Persentase komisi organisasi harus di antara 0% dan 100%.', 400);
+        }
+        if (rate + orgRate > 100) {
+          return sendError(res, 'Total komisi sales + organisasi tidak boleh melebihi 100%.', 400);
+        }
       }
 
       const updated = await prisma.user.update({
         where: { id },
-        data: { commissionRate: rate },
+        data: {
+          commissionRate: rate,
+          ...(orgRate !== undefined && { orgCommissionRate: orgRate }),
+          ...(organizationName !== undefined && {
+            organizationName: organizationName ? String(organizationName).trim() : null,
+          }),
+        },
         select: {
           id: true,
           name: true,
           email: true,
           commissionRate: true,
+          orgCommissionRate: true,
+          organizationName: true,
         },
       });
 
-      return sendSuccess(res, `Persentase komisi untuk ${updated.name} berhasil diperbarui menjadi ${rate}%.`, updated);
+      return sendSuccess(
+        res,
+        `Skema komisi untuk ${updated.name} berhasil diperbarui (Sales: ${rate}%, Organisasi: ${updated.orgCommissionRate}%).`,
+        updated
+      );
     } catch (error) {
       next(error);
     }
   }
 
   /**
-   * 13. Atur Persentase Komisi Global untuk Seluruh Tim Sales Sekaligus
+   * 13. Atur Persentase Komisi Global untuk Seluruh Tim Sales & Organisasi Sekaligus
    * PATCH /api/admin/sales/commission-rate/bulk
    */
   static async updateBulkCommissionRate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { commissionRate } = req.body;
+      const { commissionRate, orgCommissionRate } = req.body;
       if (commissionRate === undefined || isNaN(Number(commissionRate))) {
-        return sendError(res, 'Nilai persentase komisi harus berupa angka valid.', 400);
+        return sendError(res, 'Nilai persentase komisi sales harus berupa angka valid.', 400);
       }
 
       const rate = parseFloat(commissionRate);
       if (rate < 0 || rate > 100) {
-        return sendError(res, 'Persentase komisi harus di antara 0% dan 100%.', 400);
+        return sendError(res, 'Persentase komisi sales harus di antara 0% dan 100%.', 400);
       }
+
+      let orgRate: number | undefined;
+      if (orgCommissionRate !== undefined && !isNaN(Number(orgCommissionRate))) {
+        orgRate = parseFloat(orgCommissionRate);
+        if (orgRate < 0 || orgRate > 100) {
+          return sendError(res, 'Persentase komisi organisasi harus di antara 0% dan 100%.', 400);
+        }
+        if (rate + orgRate > 100) {
+          return sendError(res, 'Total pembagian komisi sales + organisasi tidak boleh melebihi 100%.', 400);
+        }
+      }
+
+      const updateData: any = {
+        commissionRate: rate,
+        ...(orgRate !== undefined && { orgCommissionRate: orgRate }),
+      };
 
       const updateResult = await prisma.user.updateMany({
         where: { role: 'SALES' },
-        data: { commissionRate: rate },
+        data: updateData,
       });
 
-      return sendSuccess(res, `Persentase komisi untuk ${updateResult.count} mitra sales berhasil diset ke ${rate}%.`, {
-        updatedCount: updateResult.count,
-        commissionRate: rate,
+      // Simpan juga di akun Admin sebagai nilai default platform
+      await prisma.user.updateMany({
+        where: { role: 'ADMIN' },
+        data: updateData,
       });
+
+      return sendSuccess(
+        res,
+        `Skema komisi global berhasil diset ke Sales ${rate}%${orgRate !== undefined ? ` & Organisasi ${orgRate}%` : ''} (${updateResult.count} mitra sales diperbarui).`,
+        {
+          updatedCount: updateResult.count,
+          commissionRate: rate,
+          orgCommissionRate: orgRate ?? 10,
+        }
+      );
     } catch (error) {
       next(error);
     }
@@ -864,6 +955,8 @@ export class AdminController {
         password,
         phone,
         commissionRate,
+        orgCommissionRate,
+        organizationName,
         tier,
         bankName,
         bankAccountNumber,
@@ -901,7 +994,12 @@ export class AdminController {
       const parsedCommissionRate =
         commissionRate !== undefined && !isNaN(Number(commissionRate))
           ? Math.min(100, Math.max(0, parseFloat(commissionRate)))
-          : 25.0;
+          : 20.0;
+
+      const parsedOrgCommissionRate =
+        orgCommissionRate !== undefined && !isNaN(Number(orgCommissionRate))
+          ? Math.min(100, Math.max(0, parseFloat(orgCommissionRate)))
+          : 10.0;
 
       const validTier = ['Silver', 'Gold', 'Platinum'].includes(tier) ? tier : 'Silver';
 
@@ -913,6 +1011,8 @@ export class AdminController {
           phone: cleanPhone,
           role: Role.SALES,
           commissionRate: parsedCommissionRate,
+          orgCommissionRate: parsedOrgCommissionRate,
+          organizationName: organizationName?.trim() || null,
           tier: validTier,
           bankName: bankName?.trim() || null,
           bankAccountNumber: bankAccountNumber?.trim() || null,
@@ -926,6 +1026,8 @@ export class AdminController {
           phone: true,
           role: true,
           commissionRate: true,
+          orgCommissionRate: true,
+          organizationName: true,
           tier: true,
           bankName: true,
           bankAccountNumber: true,

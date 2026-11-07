@@ -59,7 +59,9 @@ model User {
   password          String
   phone             String
   role              Role           @default(SALES)
-  commissionRate    Float          @default(25.0)
+  commissionRate    Float          @default(20.0)
+  orgCommissionRate Float          @default(10.0)
+  organizationName  String?
   bankName          String?
   bankAccountNumber String?
   bankAccountHolder String?
@@ -216,6 +218,8 @@ model Commission {
   invoiceAmount Float
   percentage    Float
   amount        Float
+  orgPercentage Float            @default(10.0)
+  orgAmount     Float            @default(0.0)
   status        CommissionStatus @default(READY)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
