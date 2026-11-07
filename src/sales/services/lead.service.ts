@@ -3,6 +3,12 @@ import { LeadStatus } from '../constants/enums';
 import { sanitizePhoneNumber, maskPhoneNumber } from '../utils/phoneSanitizer';
 import { config } from '../config/env';
 
+export interface CheckLeadParams {
+  phone?: string;
+  name?: string;
+  address?: string;
+}
+
 export interface CheckLeadResult {
   canClaim: boolean;
   message: string;
@@ -14,6 +20,7 @@ export interface CheckLeadResult {
     phone: string;
     status: string;
     protectedUntil: Date;
+    claimedBy?: string;
     sales: {
       id: string;
       name: string;
@@ -24,36 +31,71 @@ export interface CheckLeadResult {
 
 export class LeadService {
   /**
-   * Pengecekan real-time apakah nomor WhatsApp outlet sudah diklaim oleh sales lain
+   * Pengecekan real-time apakah nomor WhatsApp, nama toko, atau alamat outlet sudah diklaim oleh sales lain
    */
-  static async checkLeadAvailability(phone: string, currentSalesId?: string): Promise<CheckLeadResult> {
-    const cleanPhone = sanitizePhoneNumber(phone);
-    if (!cleanPhone) {
-      throw new Error('Nomor telepon/WhatsApp tidak valid.');
+  static async checkLeadAvailability(
+    queryOrPhone: string | CheckLeadParams,
+    currentSalesId?: string
+  ): Promise<CheckLeadResult> {
+    let cleanPhone: string | null = null;
+    let cleanName: string | null = null;
+    let cleanAddress: string | null = null;
+
+    if (typeof queryOrPhone === 'string') {
+      cleanPhone = sanitizePhoneNumber(queryOrPhone);
+      if (!cleanPhone) {
+        throw new Error('Nomor telepon/WhatsApp tidak valid.');
+      }
+    } else {
+      if (queryOrPhone.phone) {
+        cleanPhone = sanitizePhoneNumber(queryOrPhone.phone);
+      }
+      if (queryOrPhone.name && queryOrPhone.name.trim().length >= 3) {
+        cleanName = queryOrPhone.name.trim();
+      }
+      if (queryOrPhone.address && queryOrPhone.address.trim().length >= 3) {
+        cleanAddress = queryOrPhone.address.trim();
+      }
+
+      if (!cleanPhone && !cleanName && !cleanAddress) {
+        throw new Error('Minimal masukkan salah satu: nomor telepon/WA, nama toko, atau alamat.');
+      }
     }
 
     const now = new Date();
 
     // 1. Cek apakah outlet sudah aktif berlangganan (Approved / Deal)
-    const existingOutlet = await prisma.outlet.findFirst({
-      where: {
-        OR: [
-          { phone: cleanPhone },
-          { phone: { contains: cleanPhone.slice(-9) } },
-        ],
-      },
-      include: {
-        sales: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            role: true,
-          },
+    const outletOrConditions: any[] = [];
+    if (cleanPhone) {
+      outletOrConditions.push({ phone: cleanPhone });
+      outletOrConditions.push({ phone: { contains: cleanPhone.slice(-9) } });
+    }
+    if (cleanName) {
+      outletOrConditions.push({ name: { contains: cleanName, mode: 'insensitive' } });
+    }
+    if (cleanAddress) {
+      outletOrConditions.push({ address: { contains: cleanAddress, mode: 'insensitive' } });
+    }
+
+    let existingOutlet = null;
+    if (outletOrConditions.length > 0) {
+      existingOutlet = await prisma.outlet.findFirst({
+        where: {
+          OR: outletOrConditions,
         },
-        license: true,
-      },
-    });
+        include: {
+          sales: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              role: true,
+            },
+          },
+          license: true,
+        },
+      });
+    }
 
     if (existingOutlet) {
       const isOwnedByCurrentSales = currentSalesId && existingOutlet.salesId === currentSalesId;
@@ -80,28 +122,42 @@ export class LeadService {
       };
     }
 
-    // 2. Cari prospek aktif yang nomor teleponnya sama dan masa proteksi belum habis
-    const activeLead = await prisma.lead.findFirst({
-      where: {
-        phone: cleanPhone,
-        protectedUntil: {
-          gt: now,
+    // 2. Cari prospek aktif yang nomor telepon, nama toko, atau alamat sama dan masa proteksi belum habis
+    const leadOrConditions: any[] = [];
+    if (cleanPhone) {
+      leadOrConditions.push({ phone: cleanPhone });
+    }
+    if (cleanName) {
+      leadOrConditions.push({ storeName: { contains: cleanName, mode: 'insensitive' } });
+    }
+    if (cleanAddress) {
+      leadOrConditions.push({ address: { contains: cleanAddress, mode: 'insensitive' } });
+    }
+
+    let activeLead = null;
+    if (leadOrConditions.length > 0) {
+      activeLead = await prisma.lead.findFirst({
+        where: {
+          protectedUntil: {
+            gt: now,
+          },
+          status: {
+            notIn: [LeadStatus.EXPIRED, LeadStatus.LOST],
+          },
+          OR: leadOrConditions,
         },
-        status: {
-          notIn: [LeadStatus.EXPIRED, LeadStatus.LOST],
-        },
-      },
-      include: {
-        sales: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            role: true,
+        include: {
+          sales: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              role: true,
+            },
           },
         },
-      },
-    });
+      });
+    }
 
     if (activeLead) {
       const isOwnedByCurrentSales = currentSalesId && activeLead.salesId === currentSalesId;
@@ -110,6 +166,7 @@ export class LeadService {
       // Sembunyikan nomor telepon prospek jika sedang diklaim sales lain
       const sanitizedLead = {
         ...activeLead,
+        claimedBy: activeLead.sales.name,
         phone: isOwnedByCurrentSales ? activeLead.phone : maskPhoneNumber(activeLead.phone),
         sales: {
           ...activeLead.sales,
@@ -120,10 +177,10 @@ export class LeadService {
       return {
         canClaim: isOwnedByCurrentSales ? true : false,
         message: isOwnedByCurrentSales
-          ? 'Outlet ini sudah Anda klaim sebelumnya dan masa proteksi masih aktif.'
+          ? `Outlet "${activeLead.storeName}" sudah Anda klaim sebelumnya dan masa proteksi masih aktif.`
           : isAdminDirect
-          ? 'Outlet ini merupakan binaan langsung Admin HQ (amremi). Terproteksi penuh oleh pusat.'
-          : `Outlet sedang diprospek oleh ${activeLead.sales.name}. Terkunci hingga ${activeLead.protectedUntil.toLocaleDateString('id-ID')}.`,
+          ? `Outlet "${activeLead.storeName}" merupakan binaan langsung Admin HQ (amremi). Terproteksi penuh oleh pusat.`
+          : `Outlet "${activeLead.storeName}" sedang diprospek oleh ${activeLead.sales.name}. Terkunci hingga ${activeLead.protectedUntil.toLocaleDateString('id-ID')}.`,
         lead: sanitizedLead,
       };
     }

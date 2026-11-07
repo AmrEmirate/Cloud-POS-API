@@ -13,17 +13,25 @@ import { Role as BaseRole } from '@prisma/client';
 export class LeadController {
   /**
    * 1. Cek & Kunci Prospek (Lead Protection Check)
-   * GET /api/leads/check?phone=...
+   * GET /api/leads/check?phone=...&name=...&address=...
    */
   static async checkAvailability(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { phone } = req.query;
-      if (!phone || typeof phone !== 'string') {
-        return sendError(res, 'Nomor telepon/WhatsApp wajib disertakan.', 400);
+      const { phone, name, storeName, address } = req.query;
+      const targetPhone = typeof phone === 'string' && phone.trim() ? phone.trim() : undefined;
+      const targetName = typeof name === 'string' && name.trim() ? name.trim() : (typeof storeName === 'string' && storeName.trim() ? storeName.trim() : undefined);
+      const targetAddress = typeof address === 'string' && address.trim() ? address.trim() : undefined;
+
+      if (!targetPhone && !targetName && !targetAddress) {
+        return sendError(res, 'Minimal masukkan salah satu: nomor telepon/WA, nama toko, atau alamat.', 400);
       }
 
       const currentSalesId = req.user?.userId;
-      const result = await LeadService.checkLeadAvailability(phone, currentSalesId);
+      const result = await LeadService.checkLeadAvailability({
+        phone: targetPhone,
+        name: targetName,
+        address: targetAddress,
+      }, currentSalesId);
 
       return sendSuccess(res, result.message, result);
     } catch (error: any) {
