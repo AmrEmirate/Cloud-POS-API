@@ -97,9 +97,11 @@ apiRouter.post(
 // 4. Autentikasi & Manajemen Pengguna
 apiRouter.post('/auth/login', authController.login);
 apiRouter.get('/auth/me', authenticateJwt, authController.getMe);
+apiRouter.put('/auth/me', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.updateProfile);
 apiRouter.put('/auth/pin', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), authController.updatePin);
 apiRouter.get('/users', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), authController.getUsers);
 apiRouter.post('/users', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.createUser);
+apiRouter.put('/users/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.updateUser);
 apiRouter.delete('/users/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.deleteUser);
 
 // 5. Outlets

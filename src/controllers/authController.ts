@@ -201,6 +201,72 @@ export const updatePin = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const updateProfile = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Tidak terotentikasi' });
+    }
+
+    const { name, username, password } = req.body;
+    const cleanName = String(name || '').trim();
+    const cleanUsername = String(username || '').trim().toLowerCase();
+
+    if (!cleanName || !cleanUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nama lengkap dan username wajib diisi!',
+      });
+    }
+
+    const existingUsername = await basePrisma.user.findUnique({
+      where: { username: cleanUsername },
+    });
+
+    if (existingUsername && existingUsername.id !== req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: `Username "${cleanUsername}" sudah digunakan oleh akun lain!`,
+      });
+    }
+
+    const updateData: any = {
+      name: cleanName,
+      username: cleanUsername,
+    };
+
+    if (password && String(password).trim().length > 0) {
+      if (String(password).trim().length < 4) {
+        return res.status(400).json({
+          success: false,
+          message: 'Kata sandi baru minimal 4 karakter!',
+        });
+      }
+      updateData.passwordHash = await bcrypt.hash(String(password).trim(), 10);
+    }
+
+    const updated = await basePrisma.user.update({
+      where: { id: req.user.id },
+      data: updateData,
+      include: { outlet: true },
+    });
+
+    res.json({
+      success: true,
+      message: 'Informasi akun berhasil diperbarui!',
+      data: {
+        id: updated.id,
+        name: updated.name,
+        username: updated.username,
+        role: updated.role,
+        outletId: updated.outletId,
+        outletName: updated.outlet ? updated.outlet.name : undefined,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message || 'Gagal memperbarui informasi akun' });
+  }
+};
+
 export const getUsers = async (req: AuthRequest, res: Response) => {
   try {
     const isSuperAdmin = req.user?.role === 'SUPERADMIN';
@@ -309,6 +375,104 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message || 'Gagal menambahkan pengguna' });
+  }
+};
+
+export const updateUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { name, username, password, role, outletId, pin } = req.body;
+
+    const existingUser = await basePrisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: 'Akun staf tidak ditemukan!' });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && existingUser.tenantId !== req.user?.tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Akses ditolak: Anda tidak berhak mengubah akun tenant lain!',
+      });
+    }
+
+    if (req.user?.role !== 'SUPERADMIN' && role === 'SUPERADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Hanya Superadmin platform yang berhak menetapkan role Superadmin!',
+      });
+    }
+
+    const cleanName = String(name || existingUser.name).trim();
+    const cleanUsername = String(username || existingUser.username).trim().toLowerCase();
+
+    if (!cleanName || !cleanUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nama lengkap dan username tidak boleh kosong!',
+      });
+    }
+
+    if (cleanUsername !== existingUser.username) {
+      const duplicate = await basePrisma.user.findUnique({
+        where: { username: cleanUsername },
+      });
+      if (duplicate && duplicate.id !== id) {
+        return res.status(400).json({
+          success: false,
+          message: `Username "${cleanUsername}" sudah digunakan!`,
+        });
+      }
+    }
+
+    const nextRole = role || existingUser.role;
+    const updateData: any = {
+      name: cleanName,
+      username: cleanUsername,
+      role: nextRole,
+      outletId: nextRole === 'OWNER' || nextRole === 'SUPERADMIN' ? null : (outletId !== undefined ? (outletId || null) : existingUser.outletId),
+    };
+
+    if (password && String(password).trim().length > 0) {
+      if (String(password).trim().length < 4) {
+        return res.status(400).json({ success: false, message: 'Kata sandi baru minimal 4 karakter!' });
+      }
+      updateData.passwordHash = await bcrypt.hash(String(password).trim(), 10);
+    }
+
+    if (pin && String(pin).trim().length > 0) {
+      if (String(pin).trim().length < 4) {
+        return res.status(400).json({ success: false, message: 'PIN minimal 4 digit!' });
+      }
+      updateData.pinHash = await bcrypt.hash(String(pin).trim(), 10);
+    }
+
+    const updated = await basePrisma.user.update({
+      where: { id },
+      data: updateData,
+      include: { outlet: true },
+    });
+
+    res.json({
+      success: true,
+      message: `Data akun ${updated.name} berhasil diperbarui!`,
+      data: {
+        id: updated.id,
+        name: updated.name,
+        username: updated.username,
+        role: updated.role,
+        outletId: updated.outletId,
+        outletName: updated.outlet
+          ? updated.outlet.name
+          : updated.role === 'OWNER'
+          ? 'Seluruh Outlet (Pusat)'
+          : 'Supervisor Area',
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message || 'Gagal memperbarui akun staf' });
   }
 };
 
