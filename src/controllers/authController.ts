@@ -214,9 +214,21 @@ export const googleLogin = async (req: Request, res: Response) => {
   }
 };
 
+const isSafeRedirectOrigin = (origin: string): boolean =>
+  /^https?:\/\/[^/]+$/i.test(origin) || /^dimsumintan:\/\/auth$/i.test(origin);
+
+const buildOAuthRedirectUrl = (
+  origin: string,
+  key: 'google_token' | 'google_error',
+  value: string
+): string => {
+  const base = origin.startsWith('dimsumintan://') ? origin : `${origin}/`;
+  return `${base}?${key}=${encodeURIComponent(value)}`;
+};
+
 export const googleOAuthStart = (req: Request, res: Response) => {
   const rawOrigin = String(req.query.redirect_origin || '').trim();
-  const safeOrigin = /^https?:\/\/[^/]+$/i.test(rawOrigin)
+  const safeOrigin = isSafeRedirectOrigin(rawOrigin)
     ? rawOrigin
     : 'https://dimsumintan.vimtk.cloud';
 
@@ -239,7 +251,7 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
   try {
     if (req.query.state) {
       const parsed = JSON.parse(Buffer.from(String(req.query.state), 'base64url').toString('utf8'));
-      if (parsed?.origin && /^https?:\/\/[^/]+$/i.test(parsed.origin)) {
+      if (parsed?.origin && isSafeRedirectOrigin(parsed.origin)) {
         redirectOrigin = parsed.origin;
       }
     }
@@ -247,7 +259,7 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
     const code = req.query.code ? String(req.query.code) : '';
     if (!code) {
       return res.redirect(
-        `${redirectOrigin}/?google_error=${encodeURIComponent('Login Google dibatalkan atau gagal.')}`
+        buildOAuthRedirectUrl(redirectOrigin, 'google_error', 'Login Google dibatalkan atau gagal.')
       );
     }
 
@@ -267,9 +279,11 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
     const tokenJson: any = await tokenRes.json();
     if (!tokenRes.ok || !tokenJson.id_token) {
       return res.redirect(
-        `${redirectOrigin}/?google_error=${encodeURIComponent(
+        buildOAuthRedirectUrl(
+          redirectOrigin,
+          'google_error',
           tokenJson?.error_description || 'Gagal menukar kode otorisasi Google.'
-        )}`
+        )
       );
     }
 
@@ -282,7 +296,7 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
 
     if (!verifyRes.ok || tokenInfo.aud !== GOOGLE_CLIENT_ID || !tokenInfo.email || !isEmailVerified) {
       return res.redirect(
-        `${redirectOrigin}/?google_error=${encodeURIComponent('Akun Google tidak valid atau belum terverifikasi.')}`
+        buildOAuthRedirectUrl(redirectOrigin, 'google_error', 'Akun Google tidak valid atau belum terverifikasi.')
       );
     }
 
@@ -294,17 +308,21 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
 
     if (!user) {
       return res.redirect(
-        `${redirectOrigin}/?google_error=${encodeURIComponent(
+        buildOAuthRedirectUrl(
+          redirectOrigin,
+          'google_error',
           `Akun Google (${cleanEmail}) belum terdaftar oleh Admin/Owner. Hubungi Admin untuk mendaftarkan email Google Anda.`
-        )}`
+        )
       );
     }
 
     if (user.tenant && user.tenant.status === 'SUSPENDED') {
       return res.redirect(
-        `${redirectOrigin}/?google_error=${encodeURIComponent(
+        buildOAuthRedirectUrl(
+          redirectOrigin,
+          'google_error',
           'Akun bisnis (tenant) Anda sedang dinonaktifkan/disuspensi.'
-        )}`
+        )
       );
     }
 
@@ -322,11 +340,11 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
       { expiresIn: JWT_EXPIRES_IN as any }
     );
 
-    return res.redirect(`${redirectOrigin}/?google_token=${encodeURIComponent(token)}`);
+    return res.redirect(buildOAuthRedirectUrl(redirectOrigin, 'google_token', token));
   } catch (error: any) {
     console.error('[Google OAuth Callback Error]', error);
     return res.redirect(
-      `${redirectOrigin}/?google_error=${encodeURIComponent('Terjadi kesalahan saat memproses login Google.')}`
+      buildOAuthRedirectUrl(redirectOrigin, 'google_error', 'Terjadi kesalahan saat memproses login Google.')
     );
   }
 };
