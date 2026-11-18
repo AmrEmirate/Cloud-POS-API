@@ -96,6 +96,9 @@ apiRouter.post(
 
 // 4. Autentikasi & Manajemen Pengguna
 apiRouter.post('/auth/login', authController.login);
+apiRouter.post('/auth/google', authController.googleLogin);
+apiRouter.get('/auth/google/start', authController.googleOAuthStart);
+apiRouter.get('/auth/google/callback', authController.googleOAuthCallback);
 apiRouter.get('/auth/me', authenticateJwt, authController.getMe);
 apiRouter.put('/auth/me', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.updateProfile);
 apiRouter.put('/auth/pin', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), authController.updatePin);
