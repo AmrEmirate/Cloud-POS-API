@@ -1,4 +1,4 @@
-import { PrismaClient, OrderType, PaymentMethod, OrderStatus, ShiftStatus, PettyCashCategory, PettyCashStatus, InvoiceStatus } from '@prisma/client';
+import { PrismaClient, OrderType, PaymentMethod, OrderStatus, ShiftStatus, PettyCashCategory, PettyCashStatus, InvoiceStatus, FixedExpenseCategory, ExpenseStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -349,6 +349,36 @@ async function main() {
                 },
               ],
             },
+          },
+        });
+      }
+    }
+    // 4e. 5 FixedExpense (Beban Operasional Tetap) per outlet
+    const currentPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const fixedSamples = [
+      { title: `Sewa Lapak & Ruko ${outlet.name}`, category: FixedExpenseCategory.SEWA_LAPAK, amount: 3500000, status: ExpenseStatus.LUNAS, autoDebet: true },
+      { title: `Gaji Karyawan & Kasir ${outlet.name}`, category: FixedExpenseCategory.PAYROLL_GAJI, amount: 4200000, status: ExpenseStatus.LUNAS, autoDebet: false },
+      { title: `Tagihan Listrik PLN ${outlet.name}`, category: FixedExpenseCategory.LISTRIK, amount: 850000, status: ExpenseStatus.TERJADWAL, autoDebet: true },
+      { title: `Tagihan Air PDAM ${outlet.name}`, category: FixedExpenseCategory.AIR, amount: 275000, status: ExpenseStatus.TERJADWAL, autoDebet: false },
+      { title: `Internet & Kuota POS ${outlet.name}`, category: FixedExpenseCategory.INTERNET_POS, amount: 350000, status: ExpenseStatus.LUNAS, autoDebet: true },
+    ];
+    for (let x = 0; x < fixedSamples.length; x++) {
+      const fx = fixedSamples[x];
+      const code = `OPEX-${outletCodeClean}-DEMO-${String(x + 1).padStart(3, '0')}`;
+      const existsFx = await prisma.fixedExpense.findUnique({ where: { code } });
+      if (!existsFx) {
+        await prisma.fixedExpense.create({
+          data: {
+            tenantId,
+            code,
+            title: fx.title,
+            category: fx.category,
+            outletId: outlet.id,
+            amount: fx.amount,
+            period: currentPeriod,
+            status: fx.status,
+            dueDate: new Date(Date.now() + (5 + x * 3) * 86400_000),
+            autoDebet: fx.autoDebet,
           },
         });
       }
