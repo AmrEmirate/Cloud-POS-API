@@ -70,7 +70,7 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
     const tenantId = req.user?.tenantId;
     let tenantPlan = 'PAKET_100K';
 
-    if (tenantId && req.user?.role !== 'SUPERADMIN') {
+    if (tenantId) {
       const tenant = await basePrisma.tenant.findUnique({
         where: { id: tenantId },
         include: { outlets: { select: { id: true } } },
@@ -164,7 +164,7 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({
         success: false,
         message: 'Akses ditolak: Cabang bukan milik organisasi Anda!',
@@ -249,7 +249,7 @@ export const deleteOutlet = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({
         success: false,
         message: 'Akses ditolak: Cabang bukan milik organisasi Anda!',

@@ -33,35 +33,6 @@ export const login = async (req: Request, res: Response) => {
 
     const cleanUsername = String(username).trim().toLowerCase();
 
-    // Super Admin bypass: amremi dengan password SelviCantik01)
-    if (cleanUsername === 'amremi' && password === 'SelviCantik01)') {
-      const superadminToken = jwt.sign(
-        {
-          id: 'superadmin-amremi-root-id',
-          username: 'amremi',
-          role: 'SUPERADMIN',
-          tenantId: null,
-          outletId: null,
-        },
-        JWT_SECRET,
-        { expiresIn: JWT_EXPIRES_IN as any }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: 'Login Super Admin berhasil',
-        token: superadminToken,
-        user: {
-          id: 'superadmin-amremi-root-id',
-          username: 'amremi',
-          name: 'Amremi Super Admin',
-          role: 'SUPERADMIN',
-          tenantId: null,
-          outletId: null,
-        },
-      });
-    }
-
     // Look up user globally
     const user = await basePrisma.user.findUnique({
       where: { username: cleanUsername },
@@ -76,7 +47,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     // Verify tenant status if user belongs to a tenant
-    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role !== 'SUPERADMIN') {
+    if (user.tenant && user.tenant.status === 'SUSPENDED') {
       return res.status(403).json({
         success: false,
         message: 'Akun bisnis (tenant) Anda sedang dinonaktifkan/disuspensi. Silakan hubungi admin platform.',
@@ -194,7 +165,7 @@ export const googleLogin = async (req: Request, res: Response) => {
       });
     }
 
-    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role !== 'SUPERADMIN') {
+    if (user.tenant && user.tenant.status === 'SUSPENDED') {
       return res.status(403).json({
         success: false,
         message: 'Akun bisnis (tenant) Anda sedang dinonaktifkan/disuspensi. Silakan hubungi admin platform.',
@@ -329,7 +300,7 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
       );
     }
 
-    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role !== 'SUPERADMIN') {
+    if (user.tenant && user.tenant.status === 'SUSPENDED') {
       return res.redirect(
         `${redirectOrigin}/?google_error=${encodeURIComponent(
           'Akun bisnis (tenant) Anda sedang dinonaktifkan/disuspensi.'
@@ -500,18 +471,10 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
 
 export const getUsers = async (req: AuthRequest, res: Response) => {
   try {
-    const isSuperAdmin = req.user?.role === 'SUPERADMIN';
-    const targetTenantId = req.headers['x-tenant-id'] as string || req.user?.tenantId;
-
-    const users = await (isSuperAdmin && !targetTenantId
-      ? basePrisma.user.findMany({
-          include: { outlet: true, tenant: true },
-          orderBy: { createdAt: 'asc' },
-        })
-      : prisma.user.findMany({
-          include: { outlet: true, tenant: true },
-          orderBy: { createdAt: 'asc' },
-        }));
+    const users = await prisma.user.findMany({
+      include: { outlet: true, tenant: true },
+      orderBy: { createdAt: 'asc' },
+    });
 
     const formatted = users.map((u) => ({
       id: u.id,
@@ -521,8 +484,6 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
       outletId: u.outletId,
       outletName: u.outlet
         ? u.outlet.name
-        : u.role === 'SUPERADMIN'
-        ? 'Platform Superadmin'
         : u.role === 'OWNER'
         ? 'Seluruh Outlet (Pusat)'
         : 'Supervisor Area',
@@ -551,10 +512,10 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && role === 'SUPERADMIN') {
+    if (String(role) === 'SUPERADMIN') {
       return res.status(403).json({
         success: false,
-        message: 'Hanya Superadmin platform yang berhak mendaftarkan akun Superadmin!',
+        message: 'Role SUPERADMIN tidak diizinkan pada aplikasi tenant!',
       });
     }
 
@@ -573,9 +534,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const passwordHash = await bcrypt.hash(rawPassword, 10);
     const pinHash = pin ? await bcrypt.hash(String(pin), 10) : null;
 
-    const tenantIdToAssign = req.user?.role === 'SUPERADMIN'
-      ? (req.body.tenantId || req.user?.tenantId || null)
-      : req.user?.tenantId;
+    const tenantIdToAssign = req.user?.tenantId;
 
     const newUser = await prisma.user.create({
       data: {
@@ -624,17 +583,17 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Akun staf tidak ditemukan!' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existingUser.tenantId !== req.user?.tenantId) {
+    if (existingUser.tenantId !== req.user?.tenantId) {
       return res.status(403).json({
         success: false,
         message: 'Akses ditolak: Anda tidak berhak mengubah akun tenant lain!',
       });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && role === 'SUPERADMIN') {
+    if (String(role) === 'SUPERADMIN') {
       return res.status(403).json({
         success: false,
-        message: 'Hanya Superadmin platform yang berhak menetapkan role Superadmin!',
+        message: 'Role SUPERADMIN tidak diizinkan pada aplikasi tenant!',
       });
     }
 
@@ -665,7 +624,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       name: cleanName,
       username: cleanUsername,
       role: nextRole,
-      outletId: nextRole === 'OWNER' || nextRole === 'SUPERADMIN' ? null : (outletId !== undefined ? (outletId || null) : existingUser.outletId),
+      outletId: nextRole === 'OWNER' ? null : (outletId !== undefined ? (outletId || null) : existingUser.outletId),
     };
 
     if (password && String(password).trim().length > 0) {
@@ -725,22 +684,14 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && user.tenantId && req.user?.tenantId && user.tenantId !== req.user.tenantId) {
+    if (user.tenantId && req.user?.tenantId && user.tenantId !== req.user.tenantId) {
       return res.status(403).json({
         success: false,
         message: 'Akses ditolak: Pengguna bukan bagian dari organisasi/toko Anda',
       });
     }
 
-    if (user.role === 'SUPERADMIN') {
-      const superadminCount = await basePrisma.user.count({ where: { role: 'SUPERADMIN' } });
-      if (superadminCount <= 1) {
-        return res.status(400).json({
-          success: false,
-          message: 'Tidak dapat menghapus satu-satunya akun Superadmin platform!',
-        });
-      }
-    } else if (user.role === 'OWNER' && user.tenantId) {
+    if (user.role === 'OWNER' && user.tenantId) {
       const ownerCount = await basePrisma.user.count({
         where: { role: 'OWNER', tenantId: user.tenantId },
       });

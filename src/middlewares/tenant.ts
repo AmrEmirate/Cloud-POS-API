@@ -56,15 +56,11 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     }
 
     // 4. Check Authorization Bearer token early if present
-    let isSuperAdmin = false;
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       try {
         const jwt = require('jsonwebtoken');
         const token = req.headers.authorization.split(' ')[1];
         const decoded = jwt.decode(token) as any;
-        if (decoded?.role === 'SUPERADMIN') {
-          isSuperAdmin = true;
-        }
         if (decoded?.tenantId && !resolvedSlug && !resolvedId) {
           resolvedId = decoded.tenantId;
         }
@@ -81,8 +77,8 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
       tenant = await basePrisma.tenant.findUnique({ where: { slug: resolvedSlug } });
     }
 
-    // 5. Fallback: if not resolved and not a superadmin route, fallback to default tenant 'dimsumintan'
-    if (!tenant && !isSuperAdmin && !req.path.includes('/superadmin')) {
+    // 5. Fallback: if not resolved, fallback to default tenant 'dimsumintan'
+    if (!tenant) {
       tenant = await basePrisma.tenant.findFirst({
         where: {
           OR: [{ slug: 'dimsumintan' }, { slug: 'dimsum-intan' }],
@@ -91,7 +87,7 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     }
 
     if (tenant) {
-      if (tenant.status === 'SUSPENDED' && !isSuperAdmin && !req.path.includes('/superadmin') && !req.path.includes('/public')) {
+      if (tenant.status === 'SUSPENDED' && !req.path.includes('/public')) {
         return res.status(403).json({
           success: false,
           message: 'Akun bisnis (tenant) ini sedang dinonaktifkan/disuspensi. Silakan hubungi platform admin.',
@@ -102,9 +98,8 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
       req.tenant = tenant;
     }
 
-    // Run downstream request in tenant storage
-    const effectiveTenantId = isSuperAdmin ? (req.headers['x-tenant-id'] as string || undefined) : req.tenantId;
-    tenantStorage.run({ tenantId: effectiveTenantId, isSuperAdmin: isSuperAdmin && !effectiveTenantId }, () => {
+    // Run downstream request in tenant storage strictly scoped to req.tenantId
+    tenantStorage.run({ tenantId: req.tenantId, isSuperAdmin: false }, () => {
       next();
     });
   } catch (err) {

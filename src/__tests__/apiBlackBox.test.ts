@@ -52,18 +52,6 @@ describe('Black Box Testing: REST API Endpoints (Testing via HTTP Contract witho
       expect(response.body.message).toContain('salah');
     });
 
-    it('should return 200 OK and valid JWT token for superadmin amremi credentials', async () => {
-      const response = await request(app)
-        .post('/api/v1/auth/login')
-        .send({ username: 'amremi', password: 'SelviCantik01)' })
-        .expect('Content-Type', /json/)
-        .expect(200);
-
-      expect(response.body.success).toBe(true);
-      expect(response.body.token).toBeDefined();
-      expect(response.body.user.role).toBe('SUPERADMIN');
-      expect(response.body.user.username).toBe('amremi');
-    });
   });
 
   describe('Endpoint: Protected Routes Authentication Guard', () => {
@@ -77,13 +65,10 @@ describe('Black Box Testing: REST API Endpoints (Testing via HTTP Contract witho
       expect(response.body.message).toContain('Token otentikasi tidak ditemukan');
     });
 
-    it('should return 401 Unauthorized when accessing /api/v1/superadmin/tenants without token', async () => {
-      const response = await request(app)
+    it('should return 404 Not Found when accessing removed /api/v1/superadmin/tenants endpoint', async () => {
+      await request(app)
         .get('/api/v1/superadmin/tenants')
-        .expect('Content-Type', /json/)
-        .expect(401);
-
-      expect(response.body.success).toBe(false);
+        .expect(404);
     });
   });
 });

@@ -130,7 +130,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
     // Validasi Langganan & Kuota Transaksi Harian
     const tenantId = req.user?.tenantId;
-    if (tenantId && req.user?.role !== 'SUPERADMIN') {
+    if (tenantId) {
       const tenant = await basePrisma.tenant.findUnique({
         where: { id: tenantId },
       });
@@ -295,7 +295,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     // 4. Jika pembayaran menggunakan DUITKU_QRIS via Escrow Platform (bukan Gateway Mandiri BYOK),
     // otomatis tambahkan saldo ke dompet tenant. Jika BYOK aktif, dana QRIS otomatis langsung ke akun Midtrans/Duitku milik tenant.
     if (targetPaymentMethod === PaymentMethod.DUITKU_QRIS && tenantId) {
-      const isUsingOwnGateway = req.user?.role !== 'SUPERADMIN' && !!(await basePrisma.tenant.findFirst({
+      const isUsingOwnGateway = !!(await basePrisma.tenant.findFirst({
         where: {
           id: tenantId,
           paymentGatewayEnabled: true,
@@ -395,7 +395,7 @@ export const voidOrder = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && order.tenantId && req.user?.tenantId && order.tenantId !== req.user.tenantId) {
+    if (order.tenantId && req.user?.tenantId && order.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Pesanan bukan milik outlet/toko Anda' });
     }
 

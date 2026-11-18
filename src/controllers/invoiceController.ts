@@ -155,7 +155,7 @@ export const payInvoice = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
     }
 
@@ -191,7 +191,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
     }
 
@@ -276,7 +276,7 @@ export const deleteInvoice = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Faktur tagihan tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Faktur bukan milik toko Anda' });
     }
 

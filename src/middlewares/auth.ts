@@ -6,7 +6,7 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     username: string;
-    role: 'SUPERADMIN' | 'OWNER' | 'SUPERVISOR' | 'KASIR';
+    role: 'OWNER' | 'SUPERVISOR' | 'KASIR';
     outletId?: string;
     tenantId?: string;
     tenantSlug?: string;
@@ -36,11 +36,8 @@ export const authenticateJwt = (req: AuthRequest, res: Response, next: NextFunct
       req.tenantId = decoded.tenantId;
     }
 
-    // Run downstream inside tenant storage context if user has tenantId or is superadmin
-    const isSuperAdmin = decoded.role === 'SUPERADMIN';
-    const effectiveTenantId = isSuperAdmin ? (req.headers['x-tenant-id'] as string || undefined) : decoded.tenantId;
-
-    tenantStorage.run({ tenantId: effectiveTenantId, isSuperAdmin: isSuperAdmin && !effectiveTenantId }, () => {
+    // Run downstream inside tenant storage context strictly scoped to decoded.tenantId
+    tenantStorage.run({ tenantId: decoded.tenantId, isSuperAdmin: false }, () => {
       next();
     });
   } catch (error) {

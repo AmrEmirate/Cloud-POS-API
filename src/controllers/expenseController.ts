@@ -95,7 +95,7 @@ export const toggleExpenseStatus = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && exp.tenantId && req.user?.tenantId && exp.tenantId !== req.user.tenantId) {
+    if (exp.tenantId && req.user?.tenantId && exp.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
     }
 
@@ -130,7 +130,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
     }
 
@@ -171,7 +171,7 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Beban operasional tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Beban operasional bukan milik toko Anda' });
     }
 

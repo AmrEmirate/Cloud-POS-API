@@ -14,7 +14,6 @@ import * as invoiceController from '../controllers/invoiceController';
 import * as expenseController from '../controllers/expenseController';
 import * as reportController from '../controllers/reportController';
 import * as publicController from '../controllers/publicController';
-import * as superadminController from '../controllers/superadminController';
 import * as billingController from '../controllers/billingController';
 import * as internalSyncController from '../controllers/internalSyncController';
 import * as walletController from '../controllers/walletController';
@@ -38,80 +37,24 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
 apiRouter.get('/public/tenant-meta', publicController.getTenantMeta);
 apiRouter.get('/public/tenant-meta/:slug', publicController.getTenantMeta);
 
-// 3. Superadmin Portal (Platform Owner Management & Instant Onboarding)
-apiRouter.get(
-  '/superadmin/stats',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.getStats
-);
-apiRouter.get(
-  '/superadmin/telemetry',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.getTelemetry
-);
-apiRouter.get(
-  '/superadmin/tenants',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.getTenants
-);
-apiRouter.post(
-  '/superadmin/tenants',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.createTenant
-);
-apiRouter.put(
-  '/superadmin/tenants/:id',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.updateTenant
-);
-apiRouter.delete(
-  '/superadmin/tenants/:id',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.deleteTenant
-);
-apiRouter.get(
-  '/superadmin/invoices',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.getSubscriptionRequests
-);
-apiRouter.post(
-  '/superadmin/invoices/:id/approve',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.approveSubscriptionRequest
-);
-apiRouter.post(
-  '/superadmin/invoices/:id/reject',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  superadminController.rejectSubscriptionRequest
-);
-
-// 4. Autentikasi & Manajemen Pengguna
+// 3. Autentikasi & Manajemen Pengguna
 apiRouter.post('/auth/login', authController.login);
 apiRouter.post('/auth/google', authController.googleLogin);
 apiRouter.get('/auth/google/start', authController.googleOAuthStart);
 apiRouter.get('/auth/google/callback', authController.googleOAuthCallback);
 apiRouter.get('/auth/me', authenticateJwt, authController.getMe);
-apiRouter.put('/auth/me', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.updateProfile);
-apiRouter.put('/auth/pin', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), authController.updatePin);
-apiRouter.get('/users', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), authController.getUsers);
-apiRouter.post('/users', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.createUser);
-apiRouter.put('/users/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.updateUser);
-apiRouter.delete('/users/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), authController.deleteUser);
+apiRouter.put('/auth/me', authenticateJwt, requireRole(['OWNER']), authController.updateProfile);
+apiRouter.put('/auth/pin', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), authController.updatePin);
+apiRouter.get('/users', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), authController.getUsers);
+apiRouter.post('/users', authenticateJwt, requireRole(['OWNER']), authController.createUser);
+apiRouter.put('/users/:id', authenticateJwt, requireRole(['OWNER']), authController.updateUser);
+apiRouter.delete('/users/:id', authenticateJwt, requireRole(['OWNER']), authController.deleteUser);
 
-// 5. Outlets
+// 4. Outlets
 apiRouter.get('/outlets', outletController.getOutlets);
-apiRouter.post('/outlets', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), outletController.createOutlet);
-apiRouter.put('/outlets/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), outletController.updateOutlet);
-apiRouter.delete('/outlets/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), outletController.deleteOutlet);
+apiRouter.post('/outlets', authenticateJwt, requireRole(['OWNER']), outletController.createOutlet);
+apiRouter.put('/outlets/:id', authenticateJwt, requireRole(['OWNER']), outletController.updateOutlet);
+apiRouter.delete('/outlets/:id', authenticateJwt, requireRole(['OWNER']), outletController.deleteOutlet);
 
 // 6. POS & Transaksi Penjualan
 apiRouter.get('/pos/orders', authenticateJwt, posController.getOrders);
@@ -119,7 +62,7 @@ apiRouter.post('/pos/orders', authenticateJwt, posController.createOrder);
 apiRouter.post(
   '/pos/orders/:id/void',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   posController.voidOrder
 );
 
@@ -131,19 +74,19 @@ apiRouter.post('/shifts/close', authenticateJwt, shiftController.closeShift);
 
 // 8. Master Menu & HPP
 apiRouter.get('/menus', menuController.getMenus);
-apiRouter.post('/menus', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.createMenu);
-apiRouter.put('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.updateMenu);
-apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), menuController.toggleAvailability);
-apiRouter.delete('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.deleteMenu);
+apiRouter.post('/menus', authenticateJwt, requireRole(['OWNER']), menuController.createMenu);
+apiRouter.put('/menus/:id', authenticateJwt, requireRole(['OWNER']), menuController.updateMenu);
+apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), menuController.toggleAvailability);
+apiRouter.delete('/menus/:id', authenticateJwt, requireRole(['OWNER']), menuController.deleteMenu);
 
 // 8b. Bahan Baku (Raw Materials), Resep Menu (BOM) & Audit Opname Shift
 apiRouter.get('/materials', authenticateJwt, materialController.getRawMaterials);
-apiRouter.post('/materials', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.createRawMaterial);
-apiRouter.put('/materials/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.updateRawMaterial);
-apiRouter.delete('/materials/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), materialController.deleteRawMaterial);
+apiRouter.post('/materials', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.createRawMaterial);
+apiRouter.put('/materials/:id', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.updateRawMaterial);
+apiRouter.delete('/materials/:id', authenticateJwt, requireRole(['OWNER']), materialController.deleteRawMaterial);
 apiRouter.get('/recipes', authenticateJwt, materialController.getMenuRecipes);
-apiRouter.put('/recipes/:menuId', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.upsertMenuRecipe);
-apiRouter.get('/shifts/opname-audit', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.getShiftOpnameAudit);
+apiRouter.put('/recipes/:menuId', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.upsertMenuRecipe);
+apiRouter.get('/shifts/opname-audit', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.getShiftOpnameAudit);
 
 // Cloudinary File Upload Endpoint
 apiRouter.post('/upload', authenticateJwt, upload.single('file'), async (req: Request, res: Response) => {
@@ -172,29 +115,29 @@ apiRouter.put('/petty-cash/:id', authenticateJwt, pettyCashController.updatePett
 apiRouter.patch(
   '/petty-cash/:id/verify',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   pettyCashController.verifyPettyCash
 );
 apiRouter.delete(
   '/petty-cash/:id',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   pettyCashController.deletePettyCash
 );
 
 // 10. Tagihan Suplai Pabrik (Factory Invoices)
 apiRouter.get('/factory-invoices', authenticateJwt, invoiceController.getInvoices);
-apiRouter.post('/factory-invoices', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), invoiceController.createInvoice);
-apiRouter.put('/factory-invoices/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), invoiceController.updateInvoice);
-apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), invoiceController.payInvoice);
-apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), invoiceController.deleteInvoice);
+apiRouter.post('/factory-invoices', authenticateJwt, requireRole(['OWNER']), invoiceController.createInvoice);
+apiRouter.put('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.updateInvoice);
+apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['OWNER']), invoiceController.payInvoice);
+apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.deleteInvoice);
 
 // 11. Beban Operasional Tetap (Fixed Expenses)
 apiRouter.get('/fixed-expenses', authenticateJwt, expenseController.getExpenses);
-apiRouter.post('/fixed-expenses', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), expenseController.createExpense);
-apiRouter.put('/fixed-expenses/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), expenseController.updateExpense);
-apiRouter.patch('/fixed-expenses/:id/status', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), expenseController.toggleExpenseStatus);
-apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), expenseController.deleteExpense);
+apiRouter.post('/fixed-expenses', authenticateJwt, requireRole(['OWNER']), expenseController.createExpense);
+apiRouter.put('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.updateExpense);
+apiRouter.patch('/fixed-expenses/:id/status', authenticateJwt, requireRole(['OWNER']), expenseController.toggleExpenseStatus);
+apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.deleteExpense);
 
 // 12. Laporan Laba Rugi & Arus Kas Konsolidasi
 apiRouter.get('/reports/profit-loss', authenticateJwt, reportController.getProfitLoss);
@@ -204,25 +147,25 @@ apiRouter.get('/billing/status', authenticateJwt, billingController.getBillingSt
 apiRouter.post(
   '/billing/checkout',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   billingController.createCheckout
 );
 apiRouter.post(
   '/billing/manual-pay',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   billingController.submitManualPayment
 );
 apiRouter.get(
   '/billing/invoices',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   billingController.getInvoices
 );
 apiRouter.post(
   '/billing/pay-mock/:id',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   billingController.simulatePayInvoice
 );
 apiRouter.post('/billing/webhook/midtrans', billingController.handleMidtransWebhook);
@@ -231,7 +174,7 @@ apiRouter.post('/billing/webhook/midtrans', billingController.handleMidtransWebh
 apiRouter.post(
   '/payment/duitku/subscription-checkout',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   duitkuController.createSubscriptionCheckout
 );
 apiRouter.post(
@@ -251,19 +194,19 @@ apiRouter.post(
 apiRouter.get(
   '/payment/gateway/config',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   paymentGatewayConfigController.getPaymentGatewayConfig
 );
 apiRouter.put(
   '/payment/gateway/config',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   paymentGatewayConfigController.updatePaymentGatewayConfig
 );
 apiRouter.post(
   '/payment/gateway/test',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   paymentGatewayConfigController.testPaymentGatewayConfig
 );
 
@@ -271,49 +214,35 @@ apiRouter.post(
 apiRouter.get(
   '/wallet/summary',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   walletController.getWalletSummary
 );
 apiRouter.get(
   '/wallet/transactions',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   walletController.getTransactions
 );
 apiRouter.get(
   '/wallet/withdrawals',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR']),
   walletController.getWithdrawals
 );
 apiRouter.post(
   '/wallet/withdraw',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   walletController.requestWithdrawal
 );
 apiRouter.put(
   '/wallet/bank-account',
   authenticateJwt,
-  requireRole(['SUPERADMIN', 'OWNER']),
+  requireRole(['OWNER']),
   walletController.updateBankAccount
 );
 
-// 16. Superadmin Withdrawal Auditing & Payouts
-apiRouter.get(
-  '/superadmin/withdrawals',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  walletController.getSuperadminWithdrawals
-);
-apiRouter.post(
-  '/superadmin/withdrawals/:id/process',
-  authenticateJwt,
-  requireRole(['SUPERADMIN']),
-  walletController.processSuperadminWithdrawal
-);
-
-// 17. Paket Lisensi & Integrasi ProtekSales (Inter-Service Communication)
+// 16. Paket Lisensi & Integrasi ProtekSales (Inter-Service Communication)
 apiRouter.get('/plans', internalSyncController.getAvailablePlans);
 apiRouter.post('/license/heartbeat', internalSyncController.checkHeartbeat);
 apiRouter.post(

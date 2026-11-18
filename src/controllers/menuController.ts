@@ -43,7 +43,7 @@ export const createMenu = async (req: AuthRequest, res: Response) => {
     const count = await prisma.menuItem.count({ where: { category: cleanCategory } });
     const code = `${prefix}-${String(count + 1).padStart(3, '0')}`;
 
-    const tenantId = req.user?.role === 'SUPERADMIN' ? (req.body.tenantId || req.user?.tenantId || null) : (req.user?.tenantId || null);
+    const tenantId = req.user?.tenantId || null;
 
     const newMenu = await prisma.menuItem.create({
       data: {
@@ -84,7 +84,7 @@ export const updateMenu = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
     }
 
@@ -124,7 +124,7 @@ export const toggleAvailability = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && menu.tenantId && req.user?.tenantId && menu.tenantId !== req.user.tenantId) {
+    if (menu.tenantId && req.user?.tenantId && menu.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
     }
 
@@ -156,7 +156,7 @@ export const deleteMenu = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Menu tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Menu bukan milik toko Anda' });
     }
 

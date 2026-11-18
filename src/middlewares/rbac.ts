@@ -1,14 +1,13 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth';
 
-export const requireRole = (allowedRoles: ('SUPERADMIN' | 'OWNER' | 'SUPERVISOR' | 'KASIR')[]) => {
+export const requireRole = (allowedRoles: ('OWNER' | 'SUPERVISOR' | 'KASIR')[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Harap masuk terlebih dahulu' });
     }
 
-    // SUPERADMIN always has access to all roles
-    if (req.user.role === 'SUPERADMIN' || allowedRoles.includes(req.user.role)) {
+    if (allowedRoles.includes(req.user.role)) {
       return next();
     }
 
@@ -22,8 +21,8 @@ export const requireRole = (allowedRoles: ('SUPERADMIN' | 'OWNER' | 'SUPERVISOR'
 export const requireOutletAccess = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return res.status(401).json({ success: false, message: 'Tidak terotentikasi' });
 
-  // Superadmin, Owner, and Supervisor have access to all outlets
-  if (req.user.role === 'SUPERADMIN' || req.user.role === 'OWNER' || req.user.role === 'SUPERVISOR') {
+  // Owner and Supervisor have access to all outlets within their tenant
+  if (req.user.role === 'OWNER' || req.user.role === 'SUPERVISOR') {
     return next();
   }
 

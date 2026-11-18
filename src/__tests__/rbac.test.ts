@@ -28,16 +28,16 @@ describe('White Box Testing: rbac.ts (Role-Based Access Control Middlewares)', (
       expect(mockNext).not.toHaveBeenCalled();
     });
 
-    it('Branch: SUPERADMIN automatically bypasses any role restrictions', () => {
-      const middleware = requireRole(['OWNER']);
+    it('Branch: OWNER cannot bypass role restrictions if only SUPERVISOR is allowed', () => {
+      const middleware = requireRole(['SUPERVISOR']);
       const req = {
-        user: { id: 'u1', username: 'admin', role: 'SUPERADMIN' },
+        user: { id: 'u1', username: 'owner', role: 'OWNER' },
       } as AuthRequest;
 
       middleware(req, mockRes as Response, mockNext as NextFunction);
 
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockNext).not.toHaveBeenCalled();
     });
 
     it('Branch: user with an allowed role succeeds', () => {

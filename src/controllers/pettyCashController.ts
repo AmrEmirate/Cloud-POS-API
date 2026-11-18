@@ -183,7 +183,7 @@ export const updatePettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
     }
 
@@ -272,7 +272,7 @@ export const verifyPettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
     }
 
@@ -319,7 +319,7 @@ export const deletePettyCash = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, message: 'Catatan kas kecil tidak ditemukan' });
     }
 
-    if (req.user?.role !== 'SUPERADMIN' && existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
+    if (existing.tenantId && req.user?.tenantId && existing.tenantId !== req.user.tenantId) {
       return res.status(403).json({ success: false, message: 'Akses ditolak: Kas kecil bukan milik toko Anda' });
     }
 
