@@ -133,14 +133,14 @@ apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['OWNE
 apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.deleteInvoice);
 
 // 11. Beban Operasional Tetap (Fixed Expenses)
-apiRouter.get('/fixed-expenses', authenticateJwt, expenseController.getExpenses);
+apiRouter.get('/fixed-expenses', authenticateJwt, requireRole(['OWNER']), expenseController.getExpenses);
 apiRouter.post('/fixed-expenses', authenticateJwt, requireRole(['OWNER']), expenseController.createExpense);
 apiRouter.put('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.updateExpense);
 apiRouter.patch('/fixed-expenses/:id/status', authenticateJwt, requireRole(['OWNER']), expenseController.toggleExpenseStatus);
 apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.deleteExpense);
 
 // 12. Laporan Laba Rugi & Arus Kas Konsolidasi
-apiRouter.get('/reports/profit-loss', authenticateJwt, reportController.getProfitLoss);
+apiRouter.get('/reports/profit-loss', authenticateJwt, requireRole(['OWNER']), reportController.getProfitLoss);
 
 // 13. Manajemen Langganan, Kuota Outlet, & Payment Gateway
 apiRouter.get('/billing/status', authenticateJwt, billingController.getBillingStatus);
@@ -214,19 +214,19 @@ apiRouter.post(
 apiRouter.get(
   '/wallet/summary',
   authenticateJwt,
-  requireRole(['OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER']),
   walletController.getWalletSummary
 );
 apiRouter.get(
   '/wallet/transactions',
   authenticateJwt,
-  requireRole(['OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER']),
   walletController.getTransactions
 );
 apiRouter.get(
   '/wallet/withdrawals',
   authenticateJwt,
-  requireRole(['OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER']),
   walletController.getWithdrawals
 );
 apiRouter.post(
