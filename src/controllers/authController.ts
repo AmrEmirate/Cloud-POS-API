@@ -10,9 +10,14 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
 const getCallbackUrl = (req: Request): string => {
-  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'https';
-  const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || 'api-dimsumintan.vimtk.cloud';
-  return `${proto}://${host}/api/v1/auth/google/callback`;
+  if (process.env.GOOGLE_CALLBACK_URL) {
+    return process.env.GOOGLE_CALLBACK_URL.trim();
+  }
+  const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || '';
+  if (host.includes('localhost') || host.includes('127.0.0.1')) {
+    return `http://${host}/api/v1/auth/google/callback`;
+  }
+  return 'https://vimtk.cloud/api/v1/auth/google/callback';
 };
 
 export const login = async (req: Request, res: Response) => {
