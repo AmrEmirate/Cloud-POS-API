@@ -201,6 +201,21 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const currentActiveShift = await prisma.shiftSession.findFirst({
+      where: {
+        outletId: targetOutletId,
+        status: 'ACTIVE',
+      },
+    });
+
+    if (!currentActiveShift) {
+      return res.status(400).json({
+        success: false,
+        code: 'SHIFT_NOT_OPEN',
+        message: 'Shift kasir belum dibuka atau sudah ditutup! Buka sesi shift kasir terlebih dahulu sebelum input transaksi.',
+      });
+    }
+
     const invoiceNumber = `INV/${outletCode}/${todayStr}/${String(todayCount + 1).padStart(3, '0')}`;
 
     let targetPaymentMethod: PaymentMethod = PaymentMethod.CASH;
