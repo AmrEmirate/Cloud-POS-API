@@ -55,9 +55,26 @@ export const getCurrentShift = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const getRealtimeShiftName = (): string => {
+  const hourStr = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Jakarta',
+  }).format(new Date());
+  const hour = parseInt(hourStr, 10);
+  if (hour >= 5 && hour < 11) return 'Shift Pagi';
+  if (hour >= 11 && hour < 15) return 'Shift Siang';
+  if (hour >= 15 && hour < 18) return 'Shift Sore';
+  return 'Shift Malam';
+};
+
 export const openShift = async (req: AuthRequest, res: Response) => {
   try {
-    const { outletId, startingCash = 500000, shiftName = 'Shift 1 Pagi' } = req.body;
+    const { outletId, startingCash = 500000, shiftName } = req.body;
+    const resolvedShiftName =
+      typeof shiftName === 'string' && shiftName.trim().length > 0
+        ? shiftName.trim()
+        : getRealtimeShiftName();
 
     let targetOutletId = outletId;
     if (!targetOutletId || targetOutletId === 'all') {
@@ -106,7 +123,7 @@ export const openShift = async (req: AuthRequest, res: Response) => {
 
     const newShift = await prisma.shiftSession.create({
       data: {
-        shiftName,
+        shiftName: resolvedShiftName,
         tenantId: req.user?.tenantId || null,
         outletId: targetOutletId,
         cashierId,
