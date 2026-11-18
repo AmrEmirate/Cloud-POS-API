@@ -173,10 +173,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         }
 
         const planConfig = getPlanDetails(outletPlan);
-        const baseMonthlyLimit = planConfig.monthlyTxLimit > 0
-          ? planConfig.monthlyTxLimit
-          : (outletDaily ? outletDaily * 30 : 6000);
-        const isUnlimited = planConfig.monthlyTxLimit === 0 || outletDaily === 0;
+        const baseMonthlyLimit = planConfig.monthlyTxLimit;
+        const isUnlimited = planConfig.monthlyTxLimit === 0;
 
         if (!isUnlimited) {
           const extraMonthly = (tenant.extraDailyTxLimit || 0) * 30;
