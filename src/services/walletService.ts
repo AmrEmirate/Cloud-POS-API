@@ -77,6 +77,24 @@ export class WalletService {
     }
 
     return await basePrisma.$transaction(async (tx) => {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const existingToday = await tx.withdrawalRequest.findFirst({
+        where: {
+          tenantId: params.tenantId,
+          createdAt: { gte: startOfToday },
+          status: { notIn: ['REJECTED', 'CANCELLED'] },
+        },
+        select: { id: true, withdrawalNumber: true },
+      });
+
+      if (existingToday) {
+        throw new Error(
+          `Penarikan saldo dibatasi maksimal 1 kali per hari (sudah ada pengajuan ${existingToday.withdrawalNumber} hari ini). Silakan ajukan lagi besok.`
+        );
+      }
+
       const tenant = await tx.tenant.findUnique({
         where: { id: params.tenantId },
         select: { id: true, walletBalance: true },
