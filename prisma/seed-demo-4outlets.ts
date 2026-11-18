@@ -1,4 +1,4 @@
-import { PrismaClient, OrderType, PaymentMethod, OrderStatus, ShiftStatus, PettyCashCategory, PettyCashStatus } from '@prisma/client';
+import { PrismaClient, OrderType, PaymentMethod, OrderStatus, ShiftStatus, PettyCashCategory, PettyCashStatus, InvoiceStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -302,6 +302,53 @@ async function main() {
             status: p <= 7 ? PettyCashStatus.DISETUJUI : PettyCashStatus.MENUNGGU_VERIFIKASI,
             verifiedById: p <= 7 ? ownerUser.id : null,
             verifiedAt: p <= 7 ? new Date() : null,
+          },
+        });
+      }
+    }
+    // 4d. 5 FactoryInvoice per outlet (LUNAS, BELUM_LUNAS, JATUH_TEMPO)
+    const factorySamples = [
+      { itemName: 'Dimsum Siomay Ayam Beku (Pouch 100 pcs)', qty: 10, unit: 'Pouch', unitCost: 650000, status: InvoiceStatus.LUNAS },
+      { itemName: 'Saus Mentai Spesial & Chili Oil (Jerigen 5L)', qty: 4, unit: 'Jerigen', unitCost: 320000, status: InvoiceStatus.LUNAS },
+      { itemName: 'Dimsum Udang & Nori Beku (Pouch 100 pcs)', qty: 8, unit: 'Pouch', unitCost: 720000, status: InvoiceStatus.BELUM_LUNAS },
+      { itemName: 'Aluminium Foil & Box Mika Kemasan (Pack 500)', qty: 6, unit: 'Pack', unitCost: 280000, status: InvoiceStatus.BELUM_LUNAS },
+      { itemName: 'Dimsum Kepiting & Kulit Tahu (Pouch 100 pcs)', qty: 5, unit: 'Pouch', unitCost: 750000, status: InvoiceStatus.JATUH_TEMPO },
+    ];
+    for (let f = 0; f < factorySamples.length; f++) {
+      const sample = factorySamples[f];
+      const invNum = `FAC-${outletCodeClean}-DEMO-${String(f + 1).padStart(3, '0')}`;
+      const existingInv = await prisma.factoryInvoice.findUnique({ where: { invoiceNumber: invNum } });
+      if (!existingInv) {
+        const issueDate = new Date(Date.now() - (15 - f * 2) * 86400_000);
+        const dueDate =
+          sample.status === InvoiceStatus.JATUH_TEMPO
+            ? new Date(Date.now() - 2 * 86400_000)
+            : new Date(Date.now() + (7 + f * 3) * 86400_000);
+        const total = sample.qty * sample.unitCost;
+
+        await prisma.factoryInvoice.create({
+          data: {
+            tenantId,
+            invoiceNumber: invNum,
+            supplierName: 'PT Dimsum Prima Rasa (Pabrik Pusat)',
+            outletId: outlet.id,
+            issueDate,
+            dueDate,
+            totalAmount: total,
+            status: sample.status,
+            bankAccount: 'BCA 7788-990-112',
+            paidAt: sample.status === InvoiceStatus.LUNAS ? new Date(Date.now() - (5 - f) * 86400_000) : null,
+            items: {
+              create: [
+                {
+                  itemName: sample.itemName,
+                  quantity: sample.qty,
+                  unit: sample.unit,
+                  unitCost: sample.unitCost,
+                  total,
+                },
+              ],
+            },
           },
         });
       }
