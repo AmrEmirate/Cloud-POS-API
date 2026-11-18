@@ -90,6 +90,11 @@ export class WalletService {
           `Saldo dompet Anda tidak mencukupi! Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}`
         );
       }
+      if (numAmount !== Math.round(currentBalance)) {
+        throw new Error(
+          `Penarikan saldo wajib menarik seluruh saldo aktif sekaligus (Rp ${Math.round(currentBalance).toLocaleString('id-ID')}), bukan dompet penyimpanan!`
+        );
+      }
 
       const balanceBefore = currentBalance;
       const balanceAfter = currentBalance - numAmount;
