@@ -10,10 +10,10 @@ async function main() {
     throw new Error(`Tenant ${tenantId} tidak ditemukan di dimsum_db`);
   }
 
-  // Pastikan kuota maxOutlets cukup untuk 4 cabang
+  // Pastikan kuota maxOutlets sesuai 4 cabang fisik (Semua Cabang bukan outlet)
   await prisma.tenant.update({
     where: { id: tenantId },
-    data: { maxOutlets: 5 },
+    data: { maxOutlets: 4 },
   });
 
   // 1. Pastikan ada 4 Outlet (CB-01, CB-02, CB-03, CB-04)
