@@ -350,7 +350,7 @@ model FixedExpense {
   tenant    Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   code      String               @unique
   title     String
-  category  FixedExpenseCategory
+  category  String               @default("LAINNYA")
   outletId  String?              // null = konsolidasi seluruh outlet
   outlet    Outlet?              @relation(fields: [outletId], references: [id])
   amount    Decimal              @db.Decimal(12, 2)

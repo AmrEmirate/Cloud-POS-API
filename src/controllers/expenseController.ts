@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
-import { ExpenseStatus, FixedExpenseCategory } from '@prisma/client';
+import { ExpenseStatus } from '@prisma/client';
 
 export const getExpenses = async (req: AuthRequest, res: Response) => {
   try {
@@ -59,7 +59,7 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       data: {
         code,
         title: String(title || 'Beban Operasional').trim(),
-        category: cleanCategory as FixedExpenseCategory,
+        category: cleanCategory,
         outletId: (!outletId || outletId === 'all') ? null : outletId,
         amount: parseFloat(String(amount)) || 0,
         period: period || 'Bulan Ini',
@@ -138,7 +138,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
       where: { id },
       data: {
         ...(title && { title: String(title).trim() }),
-        ...(category && { category: String(category).trim() as FixedExpenseCategory }),
+        ...(category && { category: String(category).trim() }),
         ...(outletId !== undefined && { outletId: (!outletId || outletId === 'all') ? null : outletId }),
         ...(amount !== undefined && { amount: parseFloat(String(amount)) || 0 }),
         ...(period && { period }),
