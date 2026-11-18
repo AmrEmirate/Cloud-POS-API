@@ -22,6 +22,8 @@ const TENANT_MODELS = new Set([
   'FactoryInvoice',
   'FixedExpense',
   'SubscriptionInvoice',
+  'RawMaterial',
+  'ShiftMaterialOpname',
 ]);
 
 export const prisma = basePrisma.$extends({

@@ -1,7 +1,8 @@
 import { Response } from 'express';
 import { prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
-import { ShiftStatus } from '@prisma/client';
+import { OrderStatus, ShiftStatus } from '@prisma/client';
+import { calculateShiftOpnameItem } from '../utils/opnameCalculator';
 
 export const getCurrentShift = async (req: AuthRequest, res: Response) => {
   try {
@@ -151,7 +152,7 @@ export const openShift = async (req: AuthRequest, res: Response) => {
 
 export const closeShift = async (req: AuthRequest, res: Response) => {
   try {
-    const { actualEndingCash, notes, outletId, shiftId } = req.body;
+    const { actualEndingCash, notes, outletId, shiftId, materialOpnames } = req.body;
 
     const targetOutletId = outletId || req.user?.outletId;
     const whereClause: any = { status: ShiftStatus.ACTIVE };
@@ -178,11 +179,12 @@ export const closeShift = async (req: AuthRequest, res: Response) => {
     const actual = Number(actualEndingCash);
     const diff = actual - expected;
 
+    const closedAt = new Date();
     const closed = await prisma.shiftSession.update({
       where: { id: activeShift.id },
       data: {
         status: ShiftStatus.CLOSED,
-        endTime: new Date(),
+        endTime: closedAt,
         actualEndingCash: actual,
         difference: diff,
         notes: notes || null,
@@ -192,6 +194,112 @@ export const closeShift = async (req: AuthRequest, res: Response) => {
         cashier: { select: { name: true } },
       },
     });
+
+    // Hitung & simpan Stock Opname Bahan Baku jika dikirim saat tutup shift
+    let opnameAuditResults: any[] = [];
+    if (Array.isArray(materialOpnames) && materialOpnames.length > 0) {
+      const materialIds = materialOpnames.map((m: any) => String(m.rawMaterialId));
+      const materials = await prisma.rawMaterial.findMany({
+        where: { id: { in: materialIds }, isDeleted: false },
+      });
+      const materialMap = new Map(materials.map((m) => [m.id, m]));
+
+      // Hitung pemakaian teoritis dari semua order PAID selama sesi shift ini
+      const shiftOrders = await prisma.order.findMany({
+        where: {
+          outletId: activeShift.outletId,
+          status: OrderStatus.PAID,
+          createdAt: { gte: activeShift.startTime, lte: closedAt },
+        },
+        include: {
+          items: {
+            include: {
+              menu: {
+                include: {
+                  recipeItems: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const theoreticalByMaterial = new Map<string, number>();
+      for (const order of shiftOrders) {
+        for (const item of order.items) {
+          const recipes = item.menu?.recipeItems || [];
+          for (const rec of recipes) {
+            const prev = theoreticalByMaterial.get(rec.rawMaterialId) || 0;
+            theoreticalByMaterial.set(
+              rec.rawMaterialId,
+              prev + Number(item.quantity) * Number(rec.quantityUsed)
+            );
+          }
+        }
+      }
+
+      for (const entry of materialOpnames) {
+        const mat = materialMap.get(String(entry.rawMaterialId));
+        if (!mat) continue;
+
+        const calc = calculateShiftOpnameItem({
+          openingStock: Number(mat.currentStock),
+          restockIn: Number(entry.restockIn || 0),
+          theoreticalUsed: theoreticalByMaterial.get(mat.id) || 0,
+          actualClosing: Number(entry.actualClosing || 0),
+          costPerUnit: Number(mat.costPerUnit),
+        });
+
+        await prisma.shiftMaterialOpname.upsert({
+          where: {
+            shiftId_rawMaterialId: {
+              shiftId: closed.id,
+              rawMaterialId: mat.id,
+            },
+          },
+          update: {
+            openingStock: calc.openingStock,
+            restockIn: calc.restockIn,
+            theoreticalUsed: calc.theoreticalUsed,
+            expectedClosing: calc.expectedClosing,
+            actualClosing: calc.actualClosing,
+            variance: calc.variance,
+            varianceValue: calc.varianceValue,
+            status: calc.status,
+            notes: entry.notes ? String(entry.notes) : null,
+          },
+          create: {
+            tenantId: activeShift.tenantId,
+            shiftId: closed.id,
+            rawMaterialId: mat.id,
+            openingStock: calc.openingStock,
+            restockIn: calc.restockIn,
+            theoreticalUsed: calc.theoreticalUsed,
+            expectedClosing: calc.expectedClosing,
+            actualClosing: calc.actualClosing,
+            variance: calc.variance,
+            varianceValue: calc.varianceValue,
+            status: calc.status,
+            notes: entry.notes ? String(entry.notes) : null,
+          },
+        });
+
+        // Update stok bahan baku ke hasil hitungan fisik terbaru
+        await prisma.rawMaterial.update({
+          where: { id: mat.id },
+          data: { currentStock: calc.actualClosing },
+        });
+
+        opnameAuditResults.push({
+          rawMaterialId: mat.id,
+          materialName: mat.name,
+          unit: mat.unit,
+          ...calc,
+        });
+      }
+    }
+
+    const isCashier = req.user?.role === 'KASIR';
 
     res.json({
       success: true,
@@ -215,6 +323,8 @@ export const closeShift = async (req: AuthRequest, res: Response) => {
         difference: Number(closed.difference),
         notes: closed.notes,
         status: closed.status,
+        opnameSubmittedCount: opnameAuditResults.length,
+        ...(isCashier ? {} : { materialOpnames: opnameAuditResults }),
       },
     });
   } catch (error: any) {

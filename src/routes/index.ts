@@ -20,6 +20,7 @@ import * as internalSyncController from '../controllers/internalSyncController';
 import * as walletController from '../controllers/walletController';
 import * as duitkuController from '../controllers/duitkuController';
 import * as paymentGatewayConfigController from '../controllers/paymentGatewayConfigController';
+import * as materialController from '../controllers/materialController';
 
 export const apiRouter = Router();
 
@@ -129,6 +130,15 @@ apiRouter.post('/menus', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), 
 apiRouter.put('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.updateMenu);
 apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), menuController.toggleAvailability);
 apiRouter.delete('/menus/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), menuController.deleteMenu);
+
+// 8b. Bahan Baku (Raw Materials), Resep Menu (BOM) & Audit Opname Shift
+apiRouter.get('/materials', authenticateJwt, materialController.getRawMaterials);
+apiRouter.post('/materials', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.createRawMaterial);
+apiRouter.put('/materials/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.updateRawMaterial);
+apiRouter.delete('/materials/:id', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER']), materialController.deleteRawMaterial);
+apiRouter.get('/recipes', authenticateJwt, materialController.getMenuRecipes);
+apiRouter.put('/recipes/:menuId', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.upsertMenuRecipe);
+apiRouter.get('/shifts/opname-audit', authenticateJwt, requireRole(['SUPERADMIN', 'OWNER', 'SUPERVISOR']), materialController.getShiftOpnameAudit);
 
 // Cloudinary File Upload Endpoint
 apiRouter.post('/upload', authenticateJwt, upload.single('file'), async (req: Request, res: Response) => {
