@@ -30,5 +30,9 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # Ambil folder dist hasil compile dari stage builder
 COPY --from=builder /app/dist ./dist
 
+# Siapkan direktori runtime & jalankan kontainer sebagai non-root user (node)
+RUN mkdir -p /app/uploads /app/.wwebjs_auth && chown -R node:node /app
+USER node
+
 EXPOSE 3000
 CMD ["npm", "start"]

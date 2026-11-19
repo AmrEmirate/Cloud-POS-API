@@ -225,6 +225,41 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       targetPaymentMethod = PaymentMethod.QRIS;
     }
 
+    // Validasi & Kalkulasi Ulang Harga Menu & HPP dari Database (Anti Client-Side Price Tampering)
+    const menuIds = items
+      .map((it: any) => (it?.menuId ? String(it.menuId) : ''))
+      .filter((id: string) => id.length > 0);
+    const dbMenus = menuIds.length > 0
+      ? await prisma.menuItem.findMany({
+          where: { id: { in: menuIds } },
+          select: { id: true, name: true, price: true, costPrice: true },
+        })
+      : [];
+    const menuMap = new Map(dbMenus.map((m) => [m.id, m]));
+
+    let verifiedSubtotal = 0;
+    let verifiedHppTotal = 0;
+    const verifiedItems = items.map((it: any) => {
+      const qty = Math.max(1, parseInt(String(it.quantity), 10) || 1);
+      const dbMenu = it.menuId ? menuMap.get(String(it.menuId)) : undefined;
+      const unitPrice = dbMenu ? Number(dbMenu.price) : Math.max(0, Number(it.price) || 0);
+      const unitCost = dbMenu ? Number(dbMenu.costPrice) : Math.max(0, Number(it.costPrice) || 0);
+      verifiedSubtotal += unitPrice * qty;
+      verifiedHppTotal += unitCost * qty;
+      return {
+        menuId: it.menuId,
+        name: dbMenu ? dbMenu.name : String(it.name || 'Menu POS'),
+        price: unitPrice,
+        costPrice: unitCost,
+        quantity: qty,
+        notes: it.notes || null,
+      };
+    });
+
+    const requestedDiscount = Math.max(0, Number(discount) || 0);
+    const verifiedDiscount = Math.min(requestedDiscount, verifiedSubtotal);
+    const verifiedTotal = Math.max(0, verifiedSubtotal - verifiedDiscount);
+
     // Execute Prisma Transaction
     const createdOrder = await prisma.$transaction(async (tx) => {
       // 1. Create Order
@@ -236,24 +271,17 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           orderType: orderType === 'dine-in' ? OrderType.DINE_IN : OrderType.TAKEAWAY,
           tableNumber: tableNumber || null,
           customerName: customerName || null,
-          subtotal: subtotal,
-          discount: discount,
-          total: total,
-          hppTotal: hppTotal,
+          subtotal: verifiedSubtotal,
+          discount: verifiedDiscount,
+          total: verifiedTotal,
+          hppTotal: verifiedHppTotal,
           paymentMethod: targetPaymentMethod,
           cashReceived: cashReceived || null,
           changeAmount: changeAmount || null,
           cashierId: cashierId,
           status: OrderStatus.PAID,
           items: {
-            create: items.map((it: any) => ({
-              menuId: it.menuId,
-              name: it.name,
-              price: it.price,
-              costPrice: it.costPrice,
-              quantity: it.quantity,
-              notes: it.notes || null,
-            })),
+            create: verifiedItems,
           },
         },
         include: {
@@ -264,7 +292,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
 
       // 2. Decrement Menu Stock
-      for (const it of items) {
+      for (const it of verifiedItems) {
         if (it.menuId) {
           await tx.menuItem.update({
             where: { id: it.menuId },
@@ -290,15 +318,15 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           await tx.shiftSession.update({
             where: { id: activeShift.id },
             data: {
-              cashSales: { increment: total },
-              expectedCash: { increment: total },
+              cashSales: { increment: verifiedTotal },
+              expectedCash: { increment: verifiedTotal },
             },
           });
         } else {
           await tx.shiftSession.update({
             where: { id: activeShift.id },
             data: {
-              qrisSales: { increment: total },
+              qrisSales: { increment: verifiedTotal },
             },
           });
         }
@@ -308,7 +336,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     });
 
     // 4. Jika pembayaran menggunakan DUITKU_QRIS via Escrow Platform (bukan Gateway Mandiri BYOK),
-    // otomatis tambahkan saldo ke dompet tenant. Jika BYOK aktif, dana QRIS otomatis langsung ke akun Midtrans/Duitku milik tenant.
+    // otomatis tambahkan saldo ke dompet tenant (dilengkapi Idempotency Guard per referenceId).
     if (targetPaymentMethod === PaymentMethod.DUITKU_QRIS && tenantId) {
       const isUsingOwnGateway = !!(await basePrisma.tenant.findFirst({
         where: {
@@ -322,7 +350,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         await WalletService.creditBalance({
           tenantId,
           outletId: targetOutletId,
-          amount: total,
+          amount: verifiedTotal,
           category: 'POS_SALES',
           referenceId: createdOrder.id,
           description: `Penjualan Kasir POS (Duitku Escrow) - Nota ${createdOrder.invoiceNumber}`,

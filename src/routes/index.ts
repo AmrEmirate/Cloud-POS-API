@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { authenticateJwt } from '../middlewares/auth';
+import { authenticateJwt, optionalAuthenticateJwt } from '../middlewares/auth';
 import { requireRole } from '../middlewares/rbac';
-import { upload } from '../middlewares/upload';
+import { createRateLimiter } from '../middlewares/security';
+import { upload, validateUploadedFileMagicBytes } from '../middlewares/upload';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
 
 import * as authController from '../controllers/authController';
@@ -23,6 +24,13 @@ import * as materialController from '../controllers/materialController';
 
 export const apiRouter = Router();
 
+const authRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyPrefix: 'auth',
+  message: 'Terlalu banyak percobaan login/PIN. Silakan coba lagi dalam 15 menit.',
+});
+
 // 1. Health Check
 apiRouter.get('/health', (_req: Request, res: Response) => {
   res.json({
@@ -38,20 +46,20 @@ apiRouter.get('/public/tenant-meta', publicController.getTenantMeta);
 apiRouter.get('/public/tenant-meta/:slug', publicController.getTenantMeta);
 
 // 3. Autentikasi & Manajemen Pengguna
-apiRouter.post('/auth/login', authController.login);
-apiRouter.post('/auth/google', authController.googleLogin);
-apiRouter.get('/auth/google/start', authController.googleOAuthStart);
+apiRouter.post('/auth/login', authRateLimiter, authController.login);
+apiRouter.post('/auth/google', authRateLimiter, authController.googleLogin);
+apiRouter.get('/auth/google/start', authRateLimiter, authController.googleOAuthStart);
 apiRouter.get('/auth/google/callback', authController.googleOAuthCallback);
 apiRouter.get('/auth/me', authenticateJwt, authController.getMe);
 apiRouter.put('/auth/me', authenticateJwt, requireRole(['OWNER']), authController.updateProfile);
-apiRouter.put('/auth/pin', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), authController.updatePin);
+apiRouter.put('/auth/pin', authenticateJwt, authRateLimiter, requireRole(['OWNER', 'SUPERVISOR']), authController.updatePin);
 apiRouter.get('/users', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), authController.getUsers);
 apiRouter.post('/users', authenticateJwt, requireRole(['OWNER']), authController.createUser);
 apiRouter.put('/users/:id', authenticateJwt, requireRole(['OWNER']), authController.updateUser);
 apiRouter.delete('/users/:id', authenticateJwt, requireRole(['OWNER']), authController.deleteUser);
 
 // 4. Outlets
-apiRouter.get('/outlets', outletController.getOutlets);
+apiRouter.get('/outlets', optionalAuthenticateJwt, outletController.getOutlets);
 apiRouter.post('/outlets', authenticateJwt, requireRole(['OWNER']), outletController.createOutlet);
 apiRouter.put('/outlets/:id', authenticateJwt, requireRole(['OWNER']), outletController.updateOutlet);
 apiRouter.delete('/outlets/:id', authenticateJwt, requireRole(['OWNER']), outletController.deleteOutlet);
@@ -73,23 +81,23 @@ apiRouter.post('/shifts/open', authenticateJwt, shiftController.openShift);
 apiRouter.post('/shifts/close', authenticateJwt, shiftController.closeShift);
 
 // 8. Master Menu & HPP
-apiRouter.get('/menus', menuController.getMenus);
+apiRouter.get('/menus', optionalAuthenticateJwt, menuController.getMenus);
 apiRouter.post('/menus', authenticateJwt, requireRole(['OWNER']), menuController.createMenu);
 apiRouter.put('/menus/:id', authenticateJwt, requireRole(['OWNER']), menuController.updateMenu);
-apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), menuController.toggleAvailability);
+apiRouter.patch('/menus/:id/toggle', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']), menuController.toggleAvailability);
 apiRouter.delete('/menus/:id', authenticateJwt, requireRole(['OWNER']), menuController.deleteMenu);
 
 // 8b. Bahan Baku (Raw Materials), Resep Menu (BOM) & Audit Opname Shift
 apiRouter.get('/materials', authenticateJwt, materialController.getRawMaterials);
-apiRouter.post('/materials', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.createRawMaterial);
-apiRouter.put('/materials/:id', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.updateRawMaterial);
-apiRouter.delete('/materials/:id', authenticateJwt, requireRole(['OWNER']), materialController.deleteRawMaterial);
+apiRouter.post('/materials', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']), materialController.createRawMaterial);
+apiRouter.put('/materials/:id', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']), materialController.updateRawMaterial);
+apiRouter.delete('/materials/:id', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']), materialController.deleteRawMaterial);
 apiRouter.get('/recipes', authenticateJwt, materialController.getMenuRecipes);
-apiRouter.put('/recipes/:menuId', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.upsertMenuRecipe);
-apiRouter.get('/shifts/opname-audit', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR']), materialController.getShiftOpnameAudit);
+apiRouter.put('/recipes/:menuId', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']), materialController.upsertMenuRecipe);
+apiRouter.get('/shifts/opname-audit', authenticateJwt, requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY', 'AKUNTAN']), materialController.getShiftOpnameAudit);
 
 // Cloudinary File Upload Endpoint
-apiRouter.post('/upload', authenticateJwt, upload.single('file'), async (req: Request, res: Response) => {
+apiRouter.post('/upload', authenticateJwt, upload.single('file'), validateUploadedFileMagicBytes, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Tidak ada file gambar yang diunggah' });
@@ -110,12 +118,12 @@ apiRouter.post('/upload', authenticateJwt, upload.single('file'), async (req: Re
 
 // 9. Kas Kecil Outlet (Petty Cash)
 apiRouter.get('/petty-cash', authenticateJwt, pettyCashController.getPettyCash);
-apiRouter.post('/petty-cash', authenticateJwt, upload.single('receipt'), pettyCashController.createPettyCash);
+apiRouter.post('/petty-cash', authenticateJwt, upload.single('receipt'), validateUploadedFileMagicBytes, pettyCashController.createPettyCash);
 apiRouter.put('/petty-cash/:id', authenticateJwt, pettyCashController.updatePettyCash);
 apiRouter.patch(
   '/petty-cash/:id/verify',
   authenticateJwt,
-  requireRole(['OWNER', 'SUPERVISOR']),
+  requireRole(['OWNER', 'SUPERVISOR', 'AKUNTAN']),
   pettyCashController.verifyPettyCash
 );
 apiRouter.delete(
@@ -127,20 +135,20 @@ apiRouter.delete(
 
 // 10. Tagihan Suplai Pabrik (Factory Invoices)
 apiRouter.get('/factory-invoices', authenticateJwt, invoiceController.getInvoices);
-apiRouter.post('/factory-invoices', authenticateJwt, requireRole(['OWNER']), invoiceController.createInvoice);
-apiRouter.put('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.updateInvoice);
-apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['OWNER']), invoiceController.payInvoice);
-apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER']), invoiceController.deleteInvoice);
+apiRouter.post('/factory-invoices', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), invoiceController.createInvoice);
+apiRouter.put('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), invoiceController.updateInvoice);
+apiRouter.patch('/factory-invoices/:id/pay', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), invoiceController.payInvoice);
+apiRouter.delete('/factory-invoices/:id', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), invoiceController.deleteInvoice);
 
 // 11. Beban Operasional Tetap (Fixed Expenses)
-apiRouter.get('/fixed-expenses', authenticateJwt, requireRole(['OWNER']), expenseController.getExpenses);
-apiRouter.post('/fixed-expenses', authenticateJwt, requireRole(['OWNER']), expenseController.createExpense);
-apiRouter.put('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.updateExpense);
-apiRouter.patch('/fixed-expenses/:id/status', authenticateJwt, requireRole(['OWNER']), expenseController.toggleExpenseStatus);
-apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER']), expenseController.deleteExpense);
+apiRouter.get('/fixed-expenses', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), expenseController.getExpenses);
+apiRouter.post('/fixed-expenses', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), expenseController.createExpense);
+apiRouter.put('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), expenseController.updateExpense);
+apiRouter.patch('/fixed-expenses/:id/status', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), expenseController.toggleExpenseStatus);
+apiRouter.delete('/fixed-expenses/:id', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), expenseController.deleteExpense);
 
 // 12. Laporan Laba Rugi & Arus Kas Konsolidasi
-apiRouter.get('/reports/profit-loss', authenticateJwt, requireRole(['OWNER']), reportController.getProfitLoss);
+apiRouter.get('/reports/profit-loss', authenticateJwt, requireRole(['OWNER', 'AKUNTAN']), reportController.getProfitLoss);
 
 // 13. Manajemen Langganan, Kuota Outlet, & Payment Gateway
 apiRouter.get('/billing/status', authenticateJwt, billingController.getBillingStatus);
@@ -183,7 +191,7 @@ apiRouter.post(
   duitkuController.createPosQrPayment
 );
 apiRouter.post('/payment/duitku/callback', duitkuController.handleDuitkuCallback);
-apiRouter.get('/payment/duitku/status/:orderId', duitkuController.checkTransactionStatus);
+apiRouter.get('/payment/duitku/status/:orderId', authenticateJwt, duitkuController.checkTransactionStatus);
 apiRouter.post(
   '/payment/duitku/simulate/:orderId',
   authenticateJwt,

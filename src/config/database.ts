@@ -22,6 +22,8 @@ const TENANT_MODELS = new Set([
   'FactoryInvoice',
   'FixedExpense',
   'SubscriptionInvoice',
+  'WalletTransaction',
+  'WithdrawalRequest',
   'RawMaterial',
   'ShiftMaterialOpname',
 ]);
@@ -40,6 +42,52 @@ export const prisma = basePrisma.$extends({
         const store = tenantStorage.getStore();
         if (store?.tenantId && !store.isSuperAdmin && TENANT_MODELS.has(model)) {
           args.where = { ...(args.where || {}), tenantId: store.tenantId } as any;
+        }
+        return query(args);
+      },
+      async findUnique({ model, args, query }) {
+        const store = tenantStorage.getStore();
+        const result: any = await query(args);
+        if (
+          result &&
+          store?.tenantId &&
+          !store.isSuperAdmin &&
+          TENANT_MODELS.has(model) &&
+          result.tenantId !== store.tenantId
+        ) {
+          return null;
+        }
+        return result;
+      },
+      async update({ model, args, query }) {
+        const store = tenantStorage.getStore();
+        if (store?.tenantId && !store.isSuperAdmin && TENANT_MODELS.has(model)) {
+          const delegate = (basePrisma as any)[model.charAt(0).toLowerCase() + model.slice(1)];
+          if (delegate) {
+            const existing = await delegate.findFirst({
+              where: { ...(args.where as any), tenantId: store.tenantId },
+              select: { id: true },
+            });
+            if (!existing) {
+              throw new Error(`Akses ditolak: Data ${model} tidak ditemukan pada tenant Anda.`);
+            }
+          }
+        }
+        return query(args);
+      },
+      async delete({ model, args, query }) {
+        const store = tenantStorage.getStore();
+        if (store?.tenantId && !store.isSuperAdmin && TENANT_MODELS.has(model)) {
+          const delegate = (basePrisma as any)[model.charAt(0).toLowerCase() + model.slice(1)];
+          if (delegate) {
+            const existing = await delegate.findFirst({
+              where: { ...(args.where as any), tenantId: store.tenantId },
+              select: { id: true },
+            });
+            if (!existing) {
+              throw new Error(`Akses ditolak: Data ${model} tidak ditemukan pada tenant Anda.`);
+            }
+          }
         }
         return query(args);
       },
@@ -91,6 +139,23 @@ export const prisma = basePrisma.$extends({
         const store = tenantStorage.getStore();
         if (store?.tenantId && !store.isSuperAdmin && TENANT_MODELS.has(model)) {
           args.where = { ...(args.where || {}), tenantId: store.tenantId } as any;
+        }
+        return query(args);
+      },
+      async upsert({ model, args, query }) {
+        const store = tenantStorage.getStore();
+        if (store?.tenantId && !store.isSuperAdmin && TENANT_MODELS.has(model)) {
+          args.create = { tenantId: store.tenantId, ...(args.create as any) };
+          const delegate = (basePrisma as any)[model.charAt(0).toLowerCase() + model.slice(1)];
+          if (delegate && args.where) {
+            const existing = await delegate.findUnique({
+              where: args.where as any,
+              select: { id: true, tenantId: true },
+            });
+            if (existing && existing.tenantId && existing.tenantId !== store.tenantId) {
+              throw new Error(`Akses ditolak: Data ${model} bukan milik tenant Anda.`);
+            }
+          }
         }
         return query(args);
       },

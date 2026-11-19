@@ -67,6 +67,10 @@ export class InvoiceController {
         return sendError(res, 'Outlet tidak ditemukan.', 404);
       }
 
+      if (req.user!.role !== 'ADMIN' && outlet.salesId !== req.user!.userId) {
+        return sendError(res, 'Akses ditolak: Outlet ini bukan binaan Anda.', 403);
+      }
+
       const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
 
       const invoice = await prisma.invoice.create({
@@ -102,9 +106,20 @@ export class InvoiceController {
         return sendError(res, 'URL / berkas bukti transfer wajib disertakan.', 400);
       }
 
-      const invoice = await prisma.invoice.findUnique({ where: { id } });
+      const invoice = await prisma.invoice.findUnique({
+        where: { id },
+        include: { outlet: { select: { salesId: true } } },
+      });
       if (!invoice) {
         return sendError(res, 'Invoice tidak ditemukan.', 404);
+      }
+
+      if (req.user!.role !== 'ADMIN' && invoice.outlet?.salesId !== req.user!.userId) {
+        return sendError(res, 'Akses ditolak: Anda tidak berhak mengakses pengingat invoice ini.', 403);
+      }
+
+      if (req.user!.role !== 'ADMIN' && invoice.outlet?.salesId !== req.user!.userId) {
+        return sendError(res, 'Akses ditolak: Anda tidak berhak mengunggah bukti untuk invoice ini.', 403);
       }
 
       const updated = await prisma.invoice.update({
@@ -137,6 +152,10 @@ export class InvoiceController {
 
       if (!invoice) {
         return sendError(res, 'Invoice tidak ditemukan.', 404);
+      }
+
+      if (req.user!.role !== 'ADMIN' && invoice.outlet?.salesId !== req.user!.userId) {
+        return sendError(res, 'Akses ditolak: Anda tidak berhak mengakses pengingat invoice ini.', 403);
       }
 
       const message = BillingService.generateWhatsAppReminderMessage({

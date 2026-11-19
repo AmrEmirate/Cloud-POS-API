@@ -12,6 +12,8 @@ enum Role {
   OWNER
   SUPERVISOR
   KASIR
+  AKUNTAN
+  INVENTORY
 }
 
 enum OrderType {

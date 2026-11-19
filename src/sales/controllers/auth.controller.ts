@@ -9,7 +9,7 @@ import { sanitizePhoneNumber } from '../utils/phoneSanitizer';
 export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
     try {
-      const { name, email, password, phone, role, commissionRate, orgCommissionRate, organizationName } = req.body;
+      const { name, email, password, phone, role, organizationName } = req.body;
 
       if (!name || !email || !password || !phone) {
         return sendError(res, 'Nama, email, password, dan nomor telepon wajib diisi.', 400);
@@ -51,8 +51,8 @@ export class AuthController {
           password: hashedPassword,
           phone: cleanPhone,
           role: 'SALES',
-          commissionRate: commissionRate !== undefined ? parseFloat(commissionRate) : 20.0,
-          orgCommissionRate: orgCommissionRate !== undefined ? parseFloat(orgCommissionRate) : 10.0,
+          commissionRate: 20.0,
+          orgCommissionRate: 10.0,
           organizationName: organizationName ? String(organizationName).trim() : null,
         },
         select: {
@@ -90,14 +90,13 @@ export class AuthController {
 
       const cleanIdentifier = String(email).trim().toLowerCase();
 
-      // Super Admin ProTek HQ: username 'amremi' atau 'amremi@protek.id' dengan kata sandi 'SelviCantik01)'
-      const isAmremiAdmin =
-        (cleanIdentifier === 'amremi' ||
-          cleanIdentifier === 'amremi@protek.id' ||
-          cleanIdentifier === 'admin@protek.id') &&
-        password === 'SelviCantik01)';
+      // Verifikasi Super Admin ProTek HQ menggunakan Bcrypt Hash (Zero Plaintext Password in Source Code)
+      const isAmremiIdentifier =
+        cleanIdentifier === 'amremi' ||
+        cleanIdentifier === 'amremi@protek.id' ||
+        cleanIdentifier === 'admin@protek.id';
 
-      if (isAmremiAdmin) {
+      if (isAmremiIdentifier) {
         let adminUser: any = null;
         try {
           if (typeof prisma.user.findFirst === 'function') {
@@ -117,6 +116,19 @@ export class AuthController {
           }
         } catch {
           // Fallback dev/mock resilience
+        }
+
+        const fallbackAdminHash =
+          process.env.PROTEK_ADMIN_PASSWORD_HASH ||
+          '$2a$10$euMSquXYoykD6/56aiMUeO59TrJNoNOVm4Wp0yI9xxrgnGfRBjhbq';
+        const targetHash =
+          adminUser?.password && String(adminUser.password).startsWith('$2')
+            ? String(adminUser.password)
+            : fallbackAdminHash;
+
+        const isAdminPasswordValid = await bcrypt.compare(String(password), targetHash);
+        if (!isAdminPasswordValid) {
+          return sendError(res, 'Kombinasi email atau password salah.', 401);
         }
 
         const adminId = adminUser?.id || 'admin-amremi-hq-uuid';

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { timingSafeCompare } from '../utils/cryptoVault';
 
 export interface PaymentGatewayInvoiceParams {
   invoiceNumber: string;
@@ -181,11 +182,14 @@ export class PaymentGatewayService {
     customServerKey?: string
   ): boolean {
     const serverKey = customServerKey?.trim() || this.getServerKey();
-    if (!serverKey) return true; // In dev/simulator mode
+    if (!serverKey) {
+      return process.env.NODE_ENV !== 'production';
+    }
+    if (!signatureKey) return false;
 
     const rawString = `${orderId}${statusCode}${grossAmount}${serverKey}`;
     const calculatedHash = crypto.createHash('sha512').update(rawString).digest('hex');
 
-    return calculatedHash.toLowerCase() === signatureKey.toLowerCase();
+    return timingSafeCompare(calculatedHash.toLowerCase(), String(signatureKey).toLowerCase());
   }
 }

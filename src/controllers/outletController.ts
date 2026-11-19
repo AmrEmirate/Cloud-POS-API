@@ -3,8 +3,9 @@ import { prisma, basePrisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 import { getPlanDetails } from '../config/plans';
 
-export const getOutlets = async (_req: Request, res: Response) => {
+export const getOutlets = async (req: AuthRequest, res: Response) => {
   try {
+    const isAuthenticated = Boolean(req.user);
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
@@ -39,13 +40,13 @@ export const getOutlets = async (_req: Request, res: Response) => {
         city: o.city,
         address: o.address,
         phone: o.phone,
-        targetDailySales: Number(o.targetDailySales),
+        targetDailySales: isAuthenticated ? Number(o.targetDailySales) : 0,
         plan: (o as any).plan || planInfo.code,
         planName: planInfo.name,
         dailyTxLimit: outletDailyLimit,
         monthlyTxLimit,
         isUnlimited,
-        currentMonthTxCount: o._count?.orders ?? 0,
+        currentMonthTxCount: isAuthenticated ? (o._count?.orders ?? 0) : 0,
       };
     });
 
@@ -68,7 +69,7 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
     }
 
     const tenantId = req.user?.tenantId;
-    let tenantPlan = 'PAKET_100K';
+    let tenantPlan: string | null = null;
 
     if (tenantId) {
       const tenant = await basePrisma.tenant.findUnique({
@@ -88,6 +89,15 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    if (tenantPlan && plan && getPlanDetails(plan).code !== getPlanDetails(tenantPlan).code) {
+      const activePlanInfo = getPlanDetails(tenantPlan);
+      return res.status(400).json({
+        success: false,
+        code: 'PLAN_MISMATCH',
+        message: `Cabang baru wajib mengikuti paket langganan aktif Anda (${activePlanInfo.name}). Untuk mengubah paket, silakan lakukan melalui menu Langganan & Tagihan.`,
+      });
+    }
+
     const cleanCode = String(code).trim().toUpperCase();
 
     // Check if code already exists
@@ -102,8 +112,8 @@ export const createOutlet = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Resolve plan configuration for this specific outlet
-    const selectedPlanCode = plan || tenantPlan;
+    // Resolve plan configuration locked to tenant's active subscription plan
+    const selectedPlanCode = tenantPlan || plan || 'PAKET_100K';
     const planInfo = getPlanDetails(selectedPlanCode);
 
     const newOutlet = await prisma.outlet.create({
@@ -185,7 +195,26 @@ export const updateOutlet = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const planInfo = plan ? getPlanDetails(plan) : getPlanDetails(existing.plan);
+    let enforcedPlan = existing.plan;
+    if (existing.tenantId) {
+      const tenant = await basePrisma.tenant.findUnique({
+        where: { id: existing.tenantId },
+        select: { plan: true },
+      });
+      if (tenant?.plan) {
+        if (plan && getPlanDetails(plan).code !== getPlanDetails(tenant.plan).code) {
+          const activePlanInfo = getPlanDetails(tenant.plan);
+          return res.status(400).json({
+            success: false,
+            code: 'PLAN_MISMATCH',
+            message: `Paket cabang wajib mengikuti paket langganan aktif Anda (${activePlanInfo.name}). Untuk mengubah paket, silakan lakukan melalui menu Langganan & Tagihan.`,
+          });
+        }
+        enforcedPlan = tenant.plan;
+      }
+    }
+
+    const planInfo = plan && !existing.tenantId ? getPlanDetails(plan) : getPlanDetails(enforcedPlan);
     const resolvedDailyTxLimit = dailyTxLimit !== undefined
       ? parseInt(String(dailyTxLimit))
       : (plan ? planInfo.dailyTxLimit : existing.dailyTxLimit);

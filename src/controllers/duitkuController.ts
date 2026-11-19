@@ -6,6 +6,7 @@ import { PaymentGatewayService } from '../services/paymentGateway';
 import { WalletService } from '../services/walletService';
 import { getPlanDetails } from '../config/plans';
 import { OrderStatus, PaymentMethod } from '@prisma/client';
+import { decryptSecret } from '../utils/cryptoVault';
 
 /**
  * 1. Buat Invoice Tagihan Langganan Bulanan SaaS via Duitku
@@ -161,8 +162,11 @@ export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
     const orderRef = invoiceNumber || `INV-POS/${Date.now()}`;
     const activeProvider = (tenant.paymentGatewayProvider || 'NONE').toUpperCase();
 
+    const decryptedMidtransKey = decryptSecret(tenant.midtransServerKey);
+    const decryptedDuitkuKey = decryptSecret(tenant.duitkuApiKey);
+
     // 1. Jika Tenant mengaktifkan Midtrans (BYOK)
-    if (activeProvider === 'MIDTRANS' && tenant.midtransServerKey) {
+    if (activeProvider === 'MIDTRANS' && decryptedMidtransKey) {
       const midtransRes = await PaymentGatewayService.createTransaction(
         {
           invoiceNumber: orderRef,
@@ -171,7 +175,7 @@ export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
           customerName: req.user?.username || 'Pelanggan POS',
         },
         {
-          serverKey: tenant.midtransServerKey,
+          serverKey: decryptedMidtransKey,
           clientKey: tenant.midtransClientKey || undefined,
           isProduction: tenant.midtransIsProduction,
         }
@@ -206,7 +210,7 @@ export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
     }
 
     // 2. Jika Tenant mengaktifkan Duitku (BYOK)
-    if (activeProvider === 'DUITKU' && tenant.duitkuMerchantCode && tenant.duitkuApiKey) {
+    if (activeProvider === 'DUITKU' && tenant.duitkuMerchantCode && decryptedDuitkuKey) {
       const duitkuRes = await DuitkuService.createTransaction(
         {
           merchantOrderId: orderRef,
@@ -219,7 +223,7 @@ export const createPosQrPayment = async (req: AuthRequest, res: Response) => {
         },
         {
           merchantCode: tenant.duitkuMerchantCode,
-          apiKey: tenant.duitkuApiKey,
+          apiKey: decryptedDuitkuKey,
           isProduction: tenant.duitkuIsProduction,
         }
       );
@@ -331,17 +335,18 @@ export const handleDuitkuCallback = async (req: Request, res: Response) => {
 
     // 2. Verifikasi Signature Keamanan Duitku
     let isValid = false;
+    const tenantDuitkuApiKey = decryptSecret(orderRecord?.tenant?.duitkuApiKey);
     if (isSubscription) {
       // Gunakan API key Platform
       isValid = DuitkuService.verifyCallback(merchantCode, amount, merchantOrderId, signature);
-    } else if (orderRecord?.tenant?.duitkuApiKey) {
+    } else if (tenantDuitkuApiKey) {
       // Gunakan API key Mandiri milik Tenant (BYOK)
       isValid = DuitkuService.verifyCallback(
         merchantCode,
         amount,
         merchantOrderId,
         signature,
-        orderRecord.tenant.duitkuApiKey,
+        tenantDuitkuApiKey,
         orderRecord.tenant.duitkuMerchantCode || merchantCode
       );
     } else {
@@ -524,45 +529,11 @@ export const checkTransactionStatus = async (req: Request, res: Response) => {
 };
 
 /**
- * 5. Simulasi Bayar Instan (Duitku Mock Pay untuk Demo / Testing Lokal)
+ * 5. Simulasi Bayar Instan (Dinonaktifkan pada tahap produksi)
  */
-export const simulateDuitkuPayment = async (req: AuthRequest, res: Response) => {
-  try {
-    const { orderId } = req.params;
-    if (!orderId) {
-      return res.status(400).json({ success: false, message: 'Order ID wajib diisi' });
-    }
-
-    // Buat mock callback request
-    const mockReq: any = {
-      body: {
-        merchantCode: DuitkuService.getMerchantCode() || 'D0001',
-        amount: 100000,
-        merchantOrderId: orderId,
-        signature: 'mock_signature',
-        resultCode: '00', // Success
-        reference: `DUITKU-SIM-${Date.now()}`,
-      },
-    };
-
-    let responseResult = '';
-    const mockRes: any = {
-      status: (code: number) => ({
-        send: (text: string) => {
-          responseResult = text;
-        },
-      }),
-    };
-
-    await handleDuitkuCallback(mockReq, mockRes);
-
-    res.json({
-      success: true,
-      message: `Simulasi bayar Duitku untuk ${orderId} berhasil diproses! Status lunas & saldo mutasi tercatat seketika.`,
-      result: responseResult,
-    });
-  } catch (error: any) {
-    console.error('[Simulate Duitku Payment Error]', error);
-    res.status(500).json({ success: false, message: error.message || 'Gagal simulasi bayar Duitku' });
-  }
+export const simulateDuitkuPayment = async (_req: AuthRequest, res: Response) => {
+  return res.status(403).json({
+    success: false,
+    message: 'Simulasi pembayaran Duitku dinonaktifkan pada tahap produksi! Gunakan transaksi pembayaran resmi.',
+  });
 };

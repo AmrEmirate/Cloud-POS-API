@@ -2,15 +2,17 @@ import { Request, Response } from 'express';
 import { ProtekIntegrationService } from '../services/protekIntegration';
 import { basePrisma } from '../config/database';
 import { SAAS_PLANS } from '../config/plans';
+import { timingSafeCompare } from '../utils/cryptoVault';
 
 /**
  * Middleware verifikasi token/secret komunikasi antar-layanan (Cloud POS <-> ProtekSales)
  */
 export const verifyInternalServiceSecret = (req: Request, res: Response, next: Function) => {
-  const secretHeader = req.headers['x-internal-secret'] || req.headers['authorization']?.replace('Bearer ', '');
+  const rawHeader = req.headers['x-internal-secret'] || req.headers['authorization']?.replace('Bearer ', '');
+  const secretHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
   const expectedSecret = ProtekIntegrationService.getInternalSecret();
 
-  if (!secretHeader || secretHeader !== expectedSecret) {
+  if (!secretHeader || !timingSafeCompare(String(secretHeader), expectedSecret)) {
     return res.status(401).json({
       success: false,
       message: 'Unauthorized: Kunci otorisasi internal service tidak valid.',

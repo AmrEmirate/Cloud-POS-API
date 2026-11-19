@@ -17,9 +17,8 @@ export interface HostingerDomainResult {
 }
 
 export class HostingerDomainService {
-  private static readonly API_TOKEN =
-    process.env.HOSTINGER_API_TOKEN || 'wCqVZx5cfuGoyV1mrxOsjk1p5lubvEEYOJrnwm7V51cc9e85';
-  private static readonly VPS_ID = process.env.HOSTINGER_VPS_ID || '1194191';
+  private static readonly API_TOKEN = process.env.HOSTINGER_API_TOKEN || '';
+  private static readonly VPS_ID = process.env.HOSTINGER_VPS_ID || '';
   private static readonly SERVER_IP = process.env.SERVER_PUBLIC_IP || '72.61.215.164';
 
   /**

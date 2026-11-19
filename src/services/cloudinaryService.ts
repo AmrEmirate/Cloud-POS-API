@@ -2,10 +2,10 @@ import crypto from 'crypto';
 import fs from 'fs';
 
 export const CLOUDINARY_CONFIG = {
-  cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'a61epbay',
-  apiKey: process.env.CLOUDINARY_API_KEY || '678137155129378',
-  apiSecret: process.env.CLOUDINARY_API_SECRET || 'mpAl1RloJmeZE8ethU5X-e9Ob_g',
-  uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET || 'dimsum_intan',
+  cloudName: (process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+  apiKey: (process.env.CLOUDINARY_API_KEY || '').trim(),
+  apiSecret: (process.env.CLOUDINARY_API_SECRET || '').trim(),
+  uploadPreset: (process.env.CLOUDINARY_UPLOAD_PRESET || 'dimsum_intan').trim(),
 };
 
 /**
@@ -15,6 +15,9 @@ export async function uploadFileToCloudinary(
   filePath: string,
   folder = 'dimsum_intan'
 ): Promise<string> {
+  if (!CLOUDINARY_CONFIG.cloudName || !CLOUDINARY_CONFIG.apiKey || !CLOUDINARY_CONFIG.apiSecret) {
+    throw new Error('Konfigurasi Cloudinary (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) belum diatur.');
+  }
   const timestamp = Math.round(Date.now() / 1000);
   const signatureString = `folder=${folder}&timestamp=${timestamp}${CLOUDINARY_CONFIG.apiSecret}`;
   const signature = crypto.createHash('sha1').update(signatureString).digest('hex');

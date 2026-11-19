@@ -3,6 +3,7 @@ import { AuthRequest } from '../middlewares/auth';
 import { basePrisma } from '../config/database';
 import { DuitkuService } from '../services/duitkuService';
 import { PaymentGatewayService } from '../services/paymentGateway';
+import { encryptSecret, decryptSecret, maskSecret } from '../utils/cryptoVault';
 
 /**
  * 1. Dapatkan Konfigurasi Payment Gateway Milik Tenant (BYOK)
@@ -35,12 +36,6 @@ export const getPaymentGatewayConfig = async (req: AuthRequest, res: Response) =
       return res.status(404).json({ success: false, message: 'Tenant tidak ditemukan' });
     }
 
-    // Mask keys for safety
-    const maskKey = (key?: string | null) => {
-      if (!key || key.length < 4) return '';
-      return '••••••••' + key.slice(-4);
-    };
-
     const host = req.get('host') || 'api.posmu.cloud';
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const baseUrl = `${protocol}://${host}`;
@@ -52,14 +47,14 @@ export const getPaymentGatewayConfig = async (req: AuthRequest, res: Response) =
         enabled: tenant.paymentGatewayEnabled ?? false,
         duitku: {
           merchantCode: tenant.duitkuMerchantCode || '',
-          apiKeyMasked: maskKey(tenant.duitkuApiKey),
-          hasApiKey: !!tenant.duitkuApiKey,
+          apiKeyMasked: maskSecret(tenant.duitkuApiKey),
+          hasApiKey: !!decryptSecret(tenant.duitkuApiKey),
           isProduction: !!tenant.duitkuIsProduction,
           callbackUrl: `${baseUrl}/api/v1/payment/duitku/callback`,
         },
         midtrans: {
-          serverKeyMasked: maskKey(tenant.midtransServerKey),
-          hasServerKey: !!tenant.midtransServerKey,
+          serverKeyMasked: maskSecret(tenant.midtransServerKey),
+          hasServerKey: !!decryptSecret(tenant.midtransServerKey),
           clientKey: tenant.midtransClientKey || '',
           merchantId: tenant.midtransMerchantId || '',
           isProduction: !!tenant.midtransIsProduction,
@@ -115,14 +110,14 @@ export const updatePaymentGatewayConfig = async (req: AuthRequest, res: Response
     if (duitkuMerchantCode !== undefined) updateData.duitkuMerchantCode = String(duitkuMerchantCode).trim();
     if (duitkuIsProduction !== undefined) updateData.duitkuIsProduction = Boolean(duitkuIsProduction);
     if (duitkuApiKey && !duitkuApiKey.includes('••••')) {
-      updateData.duitkuApiKey = String(duitkuApiKey).trim();
+      updateData.duitkuApiKey = encryptSecret(String(duitkuApiKey).trim());
     }
 
     if (midtransClientKey !== undefined) updateData.midtransClientKey = String(midtransClientKey).trim();
     if (midtransMerchantId !== undefined) updateData.midtransMerchantId = String(midtransMerchantId).trim();
     if (midtransIsProduction !== undefined) updateData.midtransIsProduction = Boolean(midtransIsProduction);
     if (midtransServerKey && !midtransServerKey.includes('••••')) {
-      updateData.midtransServerKey = String(midtransServerKey).trim();
+      updateData.midtransServerKey = encryptSecret(String(midtransServerKey).trim());
     }
 
     const updated = await basePrisma.tenant.update({
@@ -161,7 +156,9 @@ export const testPaymentGatewayConfig = async (req: AuthRequest, res: Response) 
       const merchantCode = credentials?.merchantCode || tenant.duitkuMerchantCode;
       let apiKey = credentials?.apiKey;
       if (!apiKey || apiKey.includes('••••')) {
-        apiKey = tenant.duitkuApiKey;
+        apiKey = decryptSecret(tenant.duitkuApiKey);
+      } else {
+        apiKey = decryptSecret(apiKey);
       }
       const isProduction =
         credentials?.isProduction !== undefined
@@ -185,7 +182,9 @@ export const testPaymentGatewayConfig = async (req: AuthRequest, res: Response) 
     } else if (targetProvider === 'MIDTRANS') {
       let serverKey = credentials?.serverKey;
       if (!serverKey || serverKey.includes('••••')) {
-        serverKey = tenant.midtransServerKey;
+        serverKey = decryptSecret(tenant.midtransServerKey);
+      } else {
+        serverKey = decryptSecret(serverKey);
       }
       const isProduction =
         credentials?.isProduction !== undefined

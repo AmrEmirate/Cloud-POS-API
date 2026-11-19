@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/database';
 import { AuthRequest } from '../middlewares/auth';
 
-export const getMenus = async (_req: Request, res: Response) => {
+export const getMenus = async (req: AuthRequest, res: Response) => {
   try {
+    const isAuthenticated = Boolean(req.user);
     const menus = await prisma.menuItem.findMany({
       where: { isDeleted: false },
       orderBy: { code: 'asc' },
@@ -15,7 +16,7 @@ export const getMenus = async (_req: Request, res: Response) => {
       name: m.name,
       category: m.category,
       price: Number(m.price),
-      costPrice: Number(m.costPrice),
+      costPrice: isAuthenticated ? Number(m.costPrice) : 0,
       stock: m.stock,
       description: m.description || '',
       image: m.image || '',

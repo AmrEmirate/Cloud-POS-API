@@ -4,7 +4,15 @@ import bcrypt from 'bcryptjs';
 import { Role } from '@prisma/client';
 
 const PROTEK_SALES_URL = process.env.PROTEK_SALES_URL || 'http://localhost:5000/api';
-const INTERNAL_SERVICE_KEY = process.env.INTERNAL_SERVICE_KEY || 'protek-cloudpos-sync-secret-2026';
+const resolveInternalServiceKey = (): string => {
+  const key = process.env.INTERNAL_SERVICE_KEY?.trim();
+  if (key && key.length >= 16) return key;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL SECURITY ERROR: INTERNAL_SERVICE_KEY must be configured (>= 16 chars) in production.');
+  }
+  return 'protek-cloudpos-sync-secret-2026';
+};
+const INTERNAL_SERVICE_KEY = resolveInternalServiceKey();
 
 export interface ProtekHeartbeatResponse {
   success?: boolean;
@@ -364,144 +372,156 @@ export class ProtekIntegrationService {
   }
 
   /**
-   * Mengambil rangkuman seluruh tenant POS beserta metrik performanya
+   * Mengambil rangkuman seluruh tenant POS beserta metrik performanya (Batch Aggregated — Anti N+1 Query)
    */
   static async getAllTenantsOperationalSummary() {
-    const tenants = await basePrisma.tenant.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        outlets: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            city: true,
-            address: true,
-            phone: true,
-            plan: true,
-            dailyTxLimit: true,
-            targetDailySales: true,
-          },
-        },
-        _count: {
-          select: {
-            users: true,
-            outlets: true,
-            menus: true,
-          },
-        },
-      },
-    });
-
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const summaries = await Promise.all(
-      tenants.map(async (t) => {
-        const [
-          totalOrders,
-          todayOrders,
-          totalGmvAgg,
-          todayGmvAgg,
-          lastOrder,
-          ownerUser,
-          latestInvoice,
-          activeUsers,
-        ] = await Promise.all([
-          basePrisma.order.count({ where: { tenantId: t.id, status: 'PAID' } }),
-          basePrisma.order.count({
-            where: { tenantId: t.id, status: 'PAID', createdAt: { gte: startOfToday } },
-          }),
-          basePrisma.order.aggregate({
-            where: { tenantId: t.id, status: 'PAID' },
-            _sum: { total: true },
-          }),
-          basePrisma.order.aggregate({
-            where: { tenantId: t.id, status: 'PAID', createdAt: { gte: startOfToday } },
-            _sum: { total: true },
-          }),
-          basePrisma.order.findFirst({
-            where: { tenantId: t.id },
-            orderBy: { createdAt: 'desc' },
-            select: { createdAt: true },
-          }),
-          basePrisma.user.findFirst({
-            where: { tenantId: t.id, role: Role.OWNER },
-            select: { id: true, name: true, username: true },
-          }),
-          basePrisma.subscriptionInvoice.findFirst({
-            where: { tenantId: t.id, status: 'PAID' },
-            orderBy: { paidAt: 'desc' },
-          }),
-          basePrisma.user.findMany({
-            where: { tenantId: t.id },
-            select: { id: true, name: true, username: true, role: true },
-          }),
-        ]);
-
-        const plan = getPlanDetails(t.plan);
-        const mainOutlet = t.outlets[0] || null;
-
-        // Cluster location: dari city & address outlet utama riil
-        const clusterLocation = mainOutlet
-          ? (mainOutlet.city && mainOutlet.address
-              ? `${mainOutlet.city} (${mainOutlet.address})`
-              : mainOutlet.city || mainOutlet.address || 'Indonesia')
-          : 'Pusat';
-
-        return {
-          id: t.id,
-          name: t.name,
-          slug: t.slug,
-          customDomain: t.customDomain,
-          themeColor: t.themeColor,
-          themeConfig: t.themeConfig,
-          plan: t.plan,
-          planName: plan.name,
-          planDescription: plan.description,
-          status: t.status,
-          licenseKey: t.licenseKey,
-          pricePerOutlet: Number(t.pricePerOutlet),
-          maxOutlets: t.maxOutlets || 4,
-          usedOutlets: t._count.outlets,
-          monthlyBill: Number(t.pricePerOutlet) * Math.max(1, t._count.outlets || t.maxOutlets || 1),
-          hasAllBranchesView: true,
-          activePosCount: activeUsers.length || t._count.users || 1,
-          subscriptionExpiresAt: t.subscriptionExpiresAt,
-          outletsCount: t._count.outlets,
-          usersCount: activeUsers.length || t._count.users || 1,
-          menusCount: t._count.menus,
-          totalOrders,
-          todayOrders,
-          totalGmv: Number(totalGmvAgg._sum?.total || 0),
-          todayGmv: Number(todayGmvAgg._sum?.total || 0),
-          lastOrderAt: lastOrder?.createdAt || null,
-          mainOutlet,
-          outlets: t.outlets,
-          ownerName: ownerUser?.name || t.bankAccountName || 'Owner Toko',
-          ownerUsername: ownerUser?.username || 'owner',
-          ownerPhone: mainOutlet?.phone || '081284525304',
-          ownerEmail: `${t.slug}@vimtk.cloud`,
-          cluster: clusterLocation,
-          bank: {
-            bankName: t.bankName,
-            bankAccountNumber: t.bankAccountNumber,
-            bankAccountName: t.bankAccountName,
+    const [
+      tenants,
+      totalOrderStatsByTenant,
+      todayOrderStatsByTenant,
+    ] = await Promise.all([
+      basePrisma.tenant.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          outlets: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              city: true,
+              address: true,
+              phone: true,
+              plan: true,
+              dailyTxLimit: true,
+              targetDailySales: true,
+            },
           },
-          latestInvoice: latestInvoice
-            ? {
-                invoiceNumber: latestInvoice.invoiceNumber,
-                amount: Number(latestInvoice.amount),
-                paidAt: latestInvoice.paidAt,
-                description: latestInvoice.description,
-              }
-            : null,
-          createdAt: t.createdAt,
-        };
-      })
-    );
+          users: {
+            select: {
+              id: true,
+              name: true,
+              username: true,
+              role: true,
+            },
+          },
+          subscriptionInvoices: {
+            where: { status: 'PAID' },
+            orderBy: { paidAt: 'desc' },
+            take: 1,
+          },
+          _count: {
+            select: {
+              users: true,
+              outlets: true,
+              menus: true,
+            },
+          },
+        },
+      }),
+      basePrisma.order.groupBy({
+        by: ['tenantId'],
+        where: { status: 'PAID' },
+        _count: { _all: true },
+        _sum: { total: true },
+        _max: { createdAt: true },
+      }),
+      basePrisma.order.groupBy({
+        by: ['tenantId'],
+        where: { status: 'PAID', createdAt: { gte: startOfToday } },
+        _count: { _all: true },
+        _sum: { total: true },
+      }),
+    ]);
 
-    return summaries;
+    const totalStatsMap = new Map<string, { count: number; gmv: number; lastOrderAt: Date | null }>();
+    for (const row of totalOrderStatsByTenant) {
+      if (row.tenantId) {
+        totalStatsMap.set(row.tenantId, {
+          count: row._count?._all || 0,
+          gmv: Number(row._sum?.total || 0),
+          lastOrderAt: row._max?.createdAt || null,
+        });
+      }
+    }
+
+    const todayStatsMap = new Map<string, { count: number; gmv: number }>();
+    for (const row of todayOrderStatsByTenant) {
+      if (row.tenantId) {
+        todayStatsMap.set(row.tenantId, {
+          count: row._count?._all || 0,
+          gmv: Number(row._sum?.total || 0),
+        });
+      }
+    }
+
+    return tenants.map((t) => {
+      const totalStat = totalStatsMap.get(t.id) || { count: 0, gmv: 0, lastOrderAt: null };
+      const todayStat = todayStatsMap.get(t.id) || { count: 0, gmv: 0 };
+      const activeUsers = t.users || [];
+      const ownerUser = activeUsers.find((u) => u.role === Role.OWNER) || activeUsers[0] || null;
+      const latestInvoice = t.subscriptionInvoices?.[0] || null;
+      const plan = getPlanDetails(t.plan);
+      const mainOutlet = t.outlets[0] || null;
+
+      const clusterLocation = mainOutlet
+        ? (mainOutlet.city && mainOutlet.address
+            ? `${mainOutlet.city} (${mainOutlet.address})`
+            : mainOutlet.city || mainOutlet.address || 'Indonesia')
+        : 'Pusat';
+
+      return {
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        customDomain: t.customDomain,
+        themeColor: t.themeColor,
+        themeConfig: t.themeConfig,
+        plan: t.plan,
+        planName: plan.name,
+        planDescription: plan.description,
+        status: t.status,
+        licenseKey: t.licenseKey,
+        pricePerOutlet: Number(t.pricePerOutlet),
+        maxOutlets: t.maxOutlets || 4,
+        usedOutlets: t._count.outlets,
+        monthlyBill: Number(t.pricePerOutlet) * Math.max(1, t._count.outlets || t.maxOutlets || 1),
+        hasAllBranchesView: true,
+        activePosCount: activeUsers.length || t._count.users || 1,
+        subscriptionExpiresAt: t.subscriptionExpiresAt,
+        outletsCount: t._count.outlets,
+        usersCount: activeUsers.length || t._count.users || 1,
+        menusCount: t._count.menus,
+        totalOrders: totalStat.count,
+        todayOrders: todayStat.count,
+        totalGmv: totalStat.gmv,
+        todayGmv: todayStat.gmv,
+        lastOrderAt: totalStat.lastOrderAt,
+        mainOutlet,
+        outlets: t.outlets,
+        ownerName: ownerUser?.name || t.bankAccountName || 'Owner Toko',
+        ownerUsername: ownerUser?.username || 'owner',
+        ownerPhone: mainOutlet?.phone || '081284525304',
+        ownerEmail: `${t.slug}@vimtk.cloud`,
+        cluster: clusterLocation,
+        bank: {
+          bankName: t.bankName,
+          bankAccountNumber: t.bankAccountNumber,
+          bankAccountName: t.bankAccountName,
+        },
+        latestInvoice: latestInvoice
+          ? {
+              invoiceNumber: latestInvoice.invoiceNumber,
+              amount: Number(latestInvoice.amount),
+              paidAt: latestInvoice.paidAt,
+              description: latestInvoice.description,
+            }
+          : null,
+        createdAt: t.createdAt,
+      };
+    });
   }
 
   /**

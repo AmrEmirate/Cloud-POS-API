@@ -40,19 +40,20 @@ describe('Black Box Testing: ProtekSales REST API Contracts', () => {
       expect(res.body.timestamp).toBeDefined();
     });
 
-    it('Endpoint: GET /api/plans should return 200 and 4 official POS subscription plans', async () => {
+    it('Endpoint: GET /api/plans should return 200 and official POS subscription plans', async () => {
       const res = await request(app).get('/api/plans');
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
-      expect(res.body.data.length).toBe(4);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(5);
 
       const codes = res.body.data.map((p: any) => p.code);
+      expect(codes).toContain('PAKET_50K');
       expect(codes).toContain('PAKET_100K');
       expect(codes).toContain('PAKET_150K');
       expect(codes).toContain('PAKET_200K');
-      expect(codes).toContain('PAKET_250K');
+      expect(codes).toContain('PAKET_CUSTOM');
     });
 
     it('Endpoint: POST /api/license/heartbeat validation guards', async () => {

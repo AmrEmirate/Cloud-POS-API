@@ -2,9 +2,9 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma, basePrisma } from '../config/database';
-import { AuthRequest } from '../middlewares/auth';
+import { AuthRequest, getJwtSecret } from '../middlewares/auth';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dimsum_intan_super_secure_jwt_secret_key_2026';
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -334,8 +334,38 @@ export const googleLogin = async (req: Request, res: Response) => {
   }
 };
 
-const isSafeRedirectOrigin = (origin: string): boolean =>
-  /^https?:\/\/[^/]+$/i.test(origin) || /^dimsumintan:\/\/auth$/i.test(origin);
+const isSafeRedirectOrigin = async (origin: string): Promise<boolean> => {
+  if (/^dimsumintan:\/\/auth$/i.test(origin)) return true;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    if (parsed.pathname !== '/' && parsed.pathname !== '') return false;
+    if (parsed.search || parsed.hash) return false;
+
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1') return true;
+    if (
+      parsed.protocol === 'https:' &&
+      (host === 'vimtk.cloud' ||
+        host.endsWith('.vimtk.cloud') ||
+        host === 'posmu.cloud' ||
+        host.endsWith('.posmu.cloud'))
+    ) {
+      return true;
+    }
+
+    if (parsed.protocol === 'https:') {
+      const customTenant = await basePrisma.tenant.findFirst({
+        where: { customDomain: host },
+        select: { id: true },
+      });
+      if (customTenant) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+};
 
 const buildOAuthRedirectUrl = (
   origin: string,
@@ -348,7 +378,7 @@ const buildOAuthRedirectUrl = (
 
 export const googleOAuthStart = async (req: Request, res: Response) => {
   const rawOrigin = String(req.query.redirect_origin || '').trim();
-  const safeOrigin = isSafeRedirectOrigin(rawOrigin)
+  const safeOrigin = (await isSafeRedirectOrigin(rawOrigin))
     ? rawOrigin
     : 'https://dimsumintan.vimtk.cloud';
 
@@ -404,7 +434,7 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
       );
     }
 
-    if (parsedState?.origin && isSafeRedirectOrigin(parsedState.origin)) {
+    if (parsedState?.origin && (await isSafeRedirectOrigin(parsedState.origin))) {
       redirectOrigin = parsedState.origin;
     }
     if (parsedState?.tenantId) {

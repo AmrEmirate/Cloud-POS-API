@@ -19,81 +19,101 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
     }
     const hasDate = Object.keys(dateFilter).length > 0;
 
-    // 1. Sales & HPP from PAID orders
-    const orders = await prisma.order.findMany({
-      where: {
-        ...outletFilter,
-        status: OrderStatus.PAID,
-        ...(hasDate ? { createdAt: dateFilter } : {}),
-      },
-    });
+    // Jalankan agregasi SQL terpusat secara paralel (O(1) query complexity, tanpa memuat ribuan baris ke RAM)
+    const [
+      outlets,
+      ordersByOutlet,
+      pettyCashByOutlet,
+      fixedExpenseAgg,
+    ] = await Promise.all([
+      prisma.outlet.findMany({ orderBy: { code: 'asc' } }),
+      prisma.order.groupBy({
+        by: ['outletId'],
+        where: {
+          status: OrderStatus.PAID,
+          ...(hasDate ? { createdAt: dateFilter } : {}),
+        },
+        _sum: {
+          total: true,
+          hppTotal: true,
+        },
+      }),
+      prisma.pettyCash.groupBy({
+        by: ['outletId'],
+        where: {
+          status: PettyCashStatus.DISETUJUI,
+          ...(hasDate ? { createdAt: dateFilter } : {}),
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      prisma.fixedExpense.aggregate({
+        where: {
+          ...(outletId && outletId !== 'all'
+            ? { OR: [{ outletId: String(outletId) }, { outletId: null }] }
+            : {}),
+          status: ExpenseStatus.LUNAS,
+          ...(hasDate ? { dueDate: dateFilter } : {}),
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
 
-    const totalSales = orders.reduce((sum, o) => sum + Number(o.total), 0);
-    const totalHpp = orders.reduce((sum, o) => sum + Number(o.hppTotal), 0);
+    const orderAggMap = new Map<string, { sales: number; hpp: number }>();
+    for (const row of ordersByOutlet) {
+      orderAggMap.set(row.outletId, {
+        sales: Number(row._sum?.total || 0),
+        hpp: Number(row._sum?.hppTotal || 0),
+      });
+    }
+
+    const pettyAggMap = new Map<string, number>();
+    for (const row of pettyCashByOutlet) {
+      pettyAggMap.set(row.outletId, Number(row._sum?.amount || 0));
+    }
+
+    const targetOutletId = outletId && outletId !== 'all' ? String(outletId) : null;
+    let totalSales = 0;
+    let totalHpp = 0;
+    let totalPettyCash = 0;
+
+    for (const [oId, agg] of orderAggMap.entries()) {
+      if (!targetOutletId || targetOutletId === oId) {
+        totalSales += agg.sales;
+        totalHpp += agg.hpp;
+      }
+    }
+
+    for (const [oId, amt] of pettyAggMap.entries()) {
+      if (!targetOutletId || targetOutletId === oId) {
+        totalPettyCash += amt;
+      }
+    }
+
     const grossProfit = totalSales - totalHpp;
     const grossMarginPct = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
-
-    // 2. Petty cash approved
-    const pettyCashRecords = await prisma.pettyCash.findMany({
-      where: {
-        ...outletFilter,
-        status: PettyCashStatus.DISETUJUI,
-        ...(hasDate ? { createdAt: dateFilter } : {}),
-      },
-    });
-    const totalPettyCash = pettyCashRecords.reduce((sum, pc) => sum + Number(pc.amount), 0);
-
-    // 3. Fixed Expenses paid
-    const fixedExpenses = await prisma.fixedExpense.findMany({
-      where: {
-        ...(outletId && outletId !== 'all' ? { OR: [{ outletId: String(outletId) }, { outletId: null }] } : {}),
-        status: ExpenseStatus.LUNAS,
-        ...(hasDate ? { dueDate: dateFilter } : {}),
-      },
-    });
-    const totalFixedExpenses = fixedExpenses.reduce((sum, fe) => sum + Number(fe.amount), 0);
-
-    // 4. Net Profit
+    const totalFixedExpenses = Number(fixedExpenseAgg._sum?.amount || 0);
     const totalOpex = totalPettyCash + totalFixedExpenses;
     const netProfit = grossProfit - totalOpex;
     const netMarginPct = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
 
-    // 5. Outlets breakdown
-    const outlets = await prisma.outlet.findMany();
-    const outletBreakdowns = await Promise.all(
-      outlets.map(async (o) => {
-        const oOrders = await prisma.order.findMany({
-          where: {
-            outletId: o.id,
-            status: OrderStatus.PAID,
-            ...(hasDate ? { createdAt: dateFilter } : {}),
-          },
-        });
-        const oSales = oOrders.reduce((s, ord) => s + Number(ord.total), 0);
-        const oHpp = oOrders.reduce((s, ord) => s + Number(ord.hppTotal), 0);
-        const oGross = oSales - oHpp;
-
-        const oPc = await prisma.pettyCash.findMany({
-          where: {
-            outletId: o.id,
-            status: PettyCashStatus.DISETUJUI,
-            ...(hasDate ? { createdAt: dateFilter } : {}),
-          },
-        });
-        const oPetty = oPc.reduce((s, p) => s + Number(p.amount), 0);
-
-        return {
-          outletId: o.id,
-          outletName: o.name,
-          code: o.code,
-          targetDailySales: Number(o.targetDailySales),
-          actualSales: oSales,
-          hpp: oHpp,
-          grossProfit: oGross,
-          pettyCash: oPetty,
-        };
-      })
-    );
+    const outletBreakdowns = outlets.map((o) => {
+      const ordAgg = orderAggMap.get(o.id) || { sales: 0, hpp: 0 };
+      const oPetty = pettyAggMap.get(o.id) || 0;
+      return {
+        outletId: o.id,
+        outletName: o.name,
+        code: o.code,
+        targetDailySales: Number(o.targetDailySales),
+        actualSales: ordAgg.sales,
+        hpp: ordAgg.hpp,
+        grossProfit: ordAgg.sales - ordAgg.hpp,
+        pettyCash: oPetty,
+      };
+    });
 
     res.json({
       success: true,

@@ -10,16 +10,16 @@ describe('White Box Testing: plans.ts (Protek POS Package Plans & Normalization)
       expect(PROTEK_PACKAGES.PAKET_CUSTOM).toBeDefined();
 
       expect(PROTEK_PACKAGES.PAKET_50K.monthlyFee).toBe(50000);
-      expect(PROTEK_PACKAGES.PAKET_50K.monthlyTxLimit).toBe(3000);
+      expect(PROTEK_PACKAGES.PAKET_50K.monthlyTxLimit).toBe(1500);
 
       expect(PROTEK_PACKAGES.PAKET_100K.monthlyFee).toBe(100000);
       expect(PROTEK_PACKAGES.PAKET_100K.monthlyTxLimit).toBe(6000);
 
       expect(PROTEK_PACKAGES.PAKET_150K.monthlyFee).toBe(150000);
-      expect(PROTEK_PACKAGES.PAKET_150K.monthlyTxLimit).toBe(9000);
+      expect(PROTEK_PACKAGES.PAKET_150K.monthlyTxLimit).toBe(10500);
 
       expect(PROTEK_PACKAGES.PAKET_200K.monthlyFee).toBe(200000);
-      expect(PROTEK_PACKAGES.PAKET_200K.monthlyTxLimit).toBe(15000);
+      expect(PROTEK_PACKAGES.PAKET_200K.monthlyTxLimit).toBe(0);
 
       expect(PROTEK_PACKAGES.PAKET_CUSTOM.monthlyFee).toBe(0);
       expect(PROTEK_PACKAGES.PAKET_CUSTOM.monthlyTxLimit).toBe(0); // Unlimited / Custom

@@ -24,6 +24,25 @@ export class WalletService {
 
       if (!tenant) throw new Error('Tenant tidak ditemukan');
 
+      // Idempotency Guard: Cegah double-credit untuk referenceId (Order ID) yang sama
+      if (params.referenceId) {
+        const existingTx = await tx.walletTransaction.findFirst({
+          where: {
+            tenantId: tenant.id,
+            referenceId: params.referenceId,
+            type: 'CREDIT',
+          },
+        });
+        if (existingTx) {
+          return {
+            transaction: existingTx,
+            balanceBefore: Number(existingTx.balanceBefore),
+            balanceAfter: Number(existingTx.balanceAfter),
+            deduplicated: true,
+          };
+        }
+      }
+
       const balanceBefore = Number(tenant.walletBalance || 0);
       const balanceAfter = balanceBefore + numAmount;
 

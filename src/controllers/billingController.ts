@@ -5,6 +5,7 @@ import { PaymentGatewayService } from '../services/paymentGateway';
 import { WalletService } from '../services/walletService';
 import { getPlanDetails, SAAS_PLANS } from '../config/plans';
 import { OrderStatus, PaymentMethod } from '@prisma/client';
+import { decryptSecret } from '../utils/cryptoVault';
 
 export const getBillingStatus = async (req: AuthRequest, res: Response) => {
   try {
@@ -26,66 +27,66 @@ export const getBillingStatus = async (req: AuthRequest, res: Response) => {
 
     const currentPlan = getPlanDetails(tenant.plan);
 
-    // Hitung transaksi hari ini
+    // Hitung transaksi hari ini & bulan ini per outlet menggunakan O(1) SQL GROUP BY (Anti N+1 Query)
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const todayOrdersCount = await prisma.order.count({
-      where: {
-        createdAt: { gte: startOfToday },
-      },
-    });
-
-    // Hitung transaksi bulan ini (untuk perhitungan kuota bulanan)
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const monthOrdersCount = await prisma.order.count({
-      where: {
-        createdAt: { gte: startOfMonth },
-      },
+    const [todayByOutlet, monthByOutlet] = await Promise.all([
+      prisma.order.groupBy({
+        by: ['outletId'],
+        where: { createdAt: { gte: startOfToday } },
+        _count: { _all: true },
+      }),
+      prisma.order.groupBy({
+        by: ['outletId'],
+        where: { createdAt: { gte: startOfMonth } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const todayMap = new Map<string, number>();
+    let todayOrdersCount = 0;
+    for (const row of todayByOutlet) {
+      const c = row._count?._all || 0;
+      todayMap.set(row.outletId, c);
+      todayOrdersCount += c;
+    }
+
+    const monthMap = new Map<string, number>();
+    let monthOrdersCount = 0;
+    for (const row of monthByOutlet) {
+      const c = row._count?._all || 0;
+      monthMap.set(row.outletId, c);
+      monthOrdersCount += c;
+    }
+
+    const outletStats = tenant.outlets.map((o) => {
+      const todayCount = todayMap.get(o.id) || 0;
+      const monthCount = monthMap.get(o.id) || 0;
+      const outletPlan = getPlanDetails((o as any).plan || tenant.plan);
+      const outletUnlimited = outletPlan.monthlyTxLimit === 0;
+      const monthlyLimit = outletUnlimited ? 0 : outletPlan.monthlyTxLimit + ((tenant.extraDailyTxLimit || 0) * 30);
+
+      return {
+        id: o.id,
+        code: o.code,
+        name: o.name,
+        plan: outletPlan.code,
+        planName: outletPlan.name,
+        planPrice: outletPlan.price,
+        todayOrders: todayCount,
+        monthOrders: monthCount,
+        isUnlimited: outletUnlimited,
+        dailyLimit: 0,
+        monthlyLimit,
+        remaining: 'UNLIMITED',
+        remainingMonth: outletUnlimited ? 'UNLIMITED' : Math.max(0, monthlyLimit - monthCount),
+      };
     });
-
-    // Breakdown transaksi per outlet hari ini & bulan ini
-    const outletStats = await Promise.all(
-      tenant.outlets.map(async (o) => {
-        const [todayCount, monthCount] = await Promise.all([
-          prisma.order.count({
-            where: {
-              outletId: o.id,
-              createdAt: { gte: startOfToday },
-            },
-          }),
-          prisma.order.count({
-            where: {
-              outletId: o.id,
-              createdAt: { gte: startOfMonth },
-            },
-          }),
-        ]);
-
-        const outletPlan = getPlanDetails((o as any).plan || tenant.plan);
-        const outletUnlimited = outletPlan.monthlyTxLimit === 0;
-        const monthlyLimit = outletUnlimited ? 0 : outletPlan.monthlyTxLimit + ((tenant.extraDailyTxLimit || 0) * 30);
-
-        return {
-          id: o.id,
-          code: o.code,
-          name: o.name,
-          plan: outletPlan.code,
-          planName: outletPlan.name,
-          planPrice: outletPlan.price,
-          todayOrders: todayCount,
-          monthOrders: monthCount,
-          isUnlimited: outletUnlimited,
-          dailyLimit: 0,
-          monthlyLimit,
-          remaining: 'UNLIMITED',
-          remainingMonth: outletUnlimited ? 'UNLIMITED' : Math.max(0, monthlyLimit - monthCount),
-        };
-      })
-    );
 
     const now = new Date();
     const expiresAt = tenant.subscriptionExpiresAt ? new Date(tenant.subscriptionExpiresAt) : null;
@@ -620,7 +621,7 @@ export const handleMidtransWebhook = async (req: Request, res: Response) => {
 
       if (order) {
         // Re-verifikasi dengan Midtrans Server Key milik Tenant (BYOK)
-        const serverKey = order.tenant?.midtransServerKey || undefined;
+        const serverKey = decryptSecret(order.tenant?.midtransServerKey) || undefined;
         const isTenantValid = PaymentGatewayService.verifyMidtransSignature(
           order_id,
           status_code,

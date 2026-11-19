@@ -1,7 +1,9 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth';
 
-export const requireRole = (allowedRoles: ('OWNER' | 'SUPERVISOR' | 'KASIR')[]) => {
+export type TenantRole = 'OWNER' | 'SUPERVISOR' | 'KASIR' | 'AKUNTAN' | 'INVENTORY';
+
+export const requireRole = (allowedRoles: TenantRole[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Harap masuk terlebih dahulu' });
@@ -21,8 +23,8 @@ export const requireRole = (allowedRoles: ('OWNER' | 'SUPERVISOR' | 'KASIR')[]) 
 export const requireOutletAccess = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return res.status(401).json({ success: false, message: 'Tidak terotentikasi' });
 
-  // Owner and Supervisor have access to all outlets within their tenant
-  if (req.user.role === 'OWNER' || req.user.role === 'SUPERVISOR') {
+  // Owner, Supervisor, Akuntan, and Inventory have access to all outlets within their tenant
+  if (req.user.role !== 'KASIR') {
     return next();
   }
 

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { timingSafeCompare } from '../utils/cryptoVault';
 
 export interface DuitkuCredentials {
   merchantCode: string;
@@ -232,15 +233,18 @@ export class DuitkuService {
     customMerchantCode?: string
   ): boolean {
     const merchantCode = customMerchantCode || this.getMerchantCode();
-    const apiKey = customApiKey || this.getApiKey();
+    const apiKey = customApiKey !== undefined ? customApiKey : this.getApiKey();
 
-    // Jika belum konfigurasi key, izinkan untuk testing simulator
-    if (!apiKey || apiKey.length < 5) return true;
+    // Wajib memiliki API key valid di production; pada test/dev simulator mengizinkan bypass jika kosong
+    if (!apiKey || apiKey.length < 5) {
+      return process.env.NODE_ENV !== 'production';
+    }
+    if (!signatureParam) return false;
 
     const raw = `${merchantCode || merchantCodeParam}${amountParam}${merchantOrderIdParam}${apiKey}`;
     const expectedSignature = crypto.createHash('md5').update(raw).digest('hex');
 
-    return expectedSignature.toLowerCase() === String(signatureParam).toLowerCase();
+    return timingSafeCompare(expectedSignature.toLowerCase(), String(signatureParam).toLowerCase());
   }
 
   /**

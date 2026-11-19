@@ -66,6 +66,22 @@ describe('White Box Testing: rbac.ts (Role-Based Access Control Middlewares)', (
       );
       expect(mockNext).not.toHaveBeenCalled();
     });
+
+    it('Branch: AKUNTAN and INVENTORY succeed when included in allowedRoles', () => {
+      const financeMw = requireRole(['OWNER', 'AKUNTAN']);
+      const reqAkuntan = {
+        user: { id: 'u4', username: 'akuntan1', role: 'AKUNTAN' },
+      } as AuthRequest;
+      financeMw(reqAkuntan, mockRes as Response, mockNext as NextFunction);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+
+      const invMw = requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']);
+      const reqInv = {
+        user: { id: 'u5', username: 'gudang1', role: 'INVENTORY' },
+      } as AuthRequest;
+      invMw(reqInv, mockRes as Response, mockNext as NextFunction);
+      expect(mockNext).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('White Box: requireOutletAccess()', () => {
@@ -87,6 +103,22 @@ describe('White Box Testing: rbac.ts (Role-Based Access Control Middlewares)', (
       requireOutletAccess(req, mockRes as Response, mockNext as NextFunction);
 
       expect(mockNext).toHaveBeenCalled();
+    });
+
+    it('Branch: AKUNTAN and INVENTORY can access any outlet', () => {
+      const reqAkuntan = {
+        user: { id: 'u4', username: 'akuntan1', role: 'AKUNTAN' },
+        params: { outletId: 'outlet-a' },
+      } as unknown as AuthRequest;
+      requireOutletAccess(reqAkuntan, mockRes as Response, mockNext as NextFunction);
+
+      const reqInv = {
+        user: { id: 'u5', username: 'gudang1', role: 'INVENTORY' },
+        params: { outletId: 'outlet-b' },
+      } as unknown as AuthRequest;
+      requireOutletAccess(reqInv, mockRes as Response, mockNext as NextFunction);
+
+      expect(mockNext).toHaveBeenCalledTimes(2);
     });
 
     it('Branch: KASIR accessing assigned outlet succeeds', () => {
@@ -113,6 +145,22 @@ describe('White Box Testing: rbac.ts (Role-Based Access Control Middlewares)', (
         expect.objectContaining({ success: false, message: expect.stringContaining('Kasir terkunci') })
       );
       expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it('Branch: AKUNTAN and INVENTORY succeed when included in allowedRoles', () => {
+      const financeMw = requireRole(['OWNER', 'AKUNTAN']);
+      const reqAkuntan = {
+        user: { id: 'u4', username: 'akuntan1', role: 'AKUNTAN' },
+      } as AuthRequest;
+      financeMw(reqAkuntan, mockRes as Response, mockNext as NextFunction);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+
+      const invMw = requireRole(['OWNER', 'SUPERVISOR', 'INVENTORY']);
+      const reqInv = {
+        user: { id: 'u5', username: 'gudang1', role: 'INVENTORY' },
+      } as AuthRequest;
+      invMw(reqInv, mockRes as Response, mockNext as NextFunction);
+      expect(mockNext).toHaveBeenCalledTimes(2);
     });
   });
 });

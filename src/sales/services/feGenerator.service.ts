@@ -26,6 +26,15 @@ export interface GenerateTenantFeResult {
   generatedFiles: string[];
 }
 
+const escapeHtml = (unsafe?: string | null): string => {
+  return String(unsafe ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 export class TenantFeGeneratorService {
   private static readonly BASE_TENANTS_DIR = path.resolve(
     process.cwd(),
@@ -48,15 +57,20 @@ export class TenantFeGeneratorService {
       fs.mkdirSync(tenantDir, { recursive: true });
     }
 
-    // 1. Simpan Konfigurasi Tenant & Parameter Koneksi BE
+    const safeStoreName = escapeHtml(storeName);
+    const safeLicenseKey = escapeHtml(licenseKey);
+    const safeThemeColor = /^#[0-9a-fA-F]{3,8}$/.test(String(themeColor || '')) ? themeColor : '#ea580c';
+    const safeOwnerUsername = escapeHtml(input.ownerUsername || `owner_${tenantSlug}`);
+    const safePlanCode = escapeHtml(input.planCode || 'PAKET_150K');
+
+    // 1. Simpan Konfigurasi Tenant & Parameter Koneksi BE (Tanpa menyertakan password plaintext)
     const tenantConfigData = {
       tenantSlug,
       storeName,
       licenseKey,
       apiUrl,
-      themeColor,
+      themeColor: safeThemeColor,
       ownerUsername: input.ownerUsername || `owner_${tenantSlug}`,
-      ownerPassword: input.ownerPassword || 'Protek2026!Pos',
       planCode: input.planCode || 'PAKET_150K',
       monthlyFee: input.monthlyFee || 150000,
       outletCount: input.outletCount || 1,
@@ -199,13 +213,13 @@ export class TenantFeGeneratorService {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>${storeName} - Cloud POS & Sistem Akuntansi UMKM</title>
+  <title>${safeStoreName} - Cloud POS & Sistem Akuntansi UMKM</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
   <style>
     :root {
-      --brand-primary: ${themeColor};
+      --brand-primary: ${safeThemeColor};
     }
     body {
       font-family: 'Plus Jakarta Sans', sans-serif;
@@ -227,14 +241,14 @@ export class TenantFeGeneratorService {
   <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 sm:px-6 py-3 shadow-sm flex items-center justify-between">
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white shadow-md text-base" style="background-color: var(--brand-primary)">
-        ${storeName.slice(0, 2).toUpperCase()}
+        ${escapeHtml(storeName.slice(0, 2).toUpperCase())}
       </div>
       <div>
         <div class="flex items-center gap-2">
-          <h1 class="text-sm sm:text-base font-bold text-slate-900 leading-tight truncate max-w-[180px] sm:max-w-xs">${storeName}</h1>
+          <h1 class="text-sm sm:text-base font-bold text-slate-900 leading-tight truncate max-w-[180px] sm:max-w-xs">${safeStoreName}</h1>
           <span id="sub-badge" class="hidden sm:inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">Menunggu Pembayaran</span>
         </div>
-        <p class="text-[11px] text-slate-500 font-mono">Lisensi: ${licenseKey}</p>
+        <p class="text-[11px] text-slate-500 font-mono">Lisensi: ${safeLicenseKey}</p>
       </div>
     </div>
 
@@ -490,7 +504,7 @@ export class TenantFeGeneratorService {
     <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
       <div class="text-center space-y-1">
         <div class="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white text-xl font-bold mb-2" style="background-color: var(--brand-primary)">
-          ${storeName.slice(0, 2).toUpperCase()}
+          ${escapeHtml(storeName.slice(0, 2).toUpperCase())}
         </div>
         <h3 class="text-base font-bold text-slate-900">Login Pemilik Toko</h3>
         <p class="text-xs text-slate-500">Masuk menggunakan kredensial yang dibuat sales</p>
@@ -499,11 +513,11 @@ export class TenantFeGeneratorService {
       <div class="space-y-3 text-xs">
         <div>
           <label class="block font-bold text-slate-700 mb-1">Username Login</label>
-          <input type="text" id="login-username" value="${input.ownerUsername || `owner_${tenantSlug}`}" class="w-full h-10 px-3 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 font-mono text-xs font-bold" />
+          <input type="text" id="login-username" value="${safeOwnerUsername}" class="w-full h-10 px-3 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 font-mono text-xs font-bold" />
         </div>
         <div>
           <label class="block font-bold text-slate-700 mb-1">Password</label>
-          <input type="password" id="login-password" value="${input.ownerPassword || 'Protek2026!Pos'}" class="w-full h-10 px-3 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 text-xs font-medium" />
+          <input type="password" id="login-password" placeholder="Masukkan password akun Anda" class="w-full h-10 px-3 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 text-xs font-medium" />
         </div>
         <button onclick="submitLogin()" class="w-full h-11 rounded-xl text-white font-bold text-xs shadow-md transition" style="background-color: var(--brand-primary)">
           Masuk ke Sistem Kasir
@@ -522,7 +536,7 @@ export class TenantFeGeneratorService {
           </div>
           <div>
             <h3 class="text-base font-bold text-slate-900">Aktivasi Langganan Bulan ke-1</h3>
-            <p class="text-xs text-slate-500">Paket: ${input.planCode || 'PAKET_150K'} (${input.outletCount || 1} Outlet)</p>
+            <p class="text-xs text-slate-500">Paket: ${safePlanCode} (${Number(input.outletCount) || 1} Outlet)</p>
           </div>
         </div>
         <button onclick="closeSubscriptionModal()" class="text-slate-400 hover:text-slate-700 text-lg font-bold">&times;</button>
