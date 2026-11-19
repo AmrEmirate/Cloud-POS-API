@@ -269,10 +269,21 @@ export const googleLogin = async (req: Request, res: Response) => {
     }
 
     // Strict whitelist: hanya akun yang sudah didaftarkan oleh Admin/Owner yang boleh masuk
-    const user = await basePrisma.user.findFirst({
+    let user = await basePrisma.user.findFirst({
       where: { username: { equals: cleanEmail, mode: 'insensitive' } },
       include: { outlet: true, tenant: true },
     });
+
+    // Izinkan akun developer/owner (amremirate03@gmail.com) login ke tenant testing terisolasi
+    if (targetTenant?.id === 'tenant-testing' && cleanEmail === 'amremirate03@gmail.com') {
+      const testingOwner = await basePrisma.user.findFirst({
+        where: { tenantId: 'tenant-testing', role: 'OWNER' },
+        include: { outlet: true, tenant: true },
+      });
+      if (testingOwner) {
+        user = testingOwner;
+      }
+    }
 
     if (!user) {
       return res.status(403).json({
@@ -486,10 +497,21 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
     }
 
     const cleanEmail = String(tokenInfo.email).trim().toLowerCase();
-    const user = await basePrisma.user.findFirst({
+    let user = await basePrisma.user.findFirst({
       where: { username: { equals: cleanEmail, mode: 'insensitive' } },
       include: { outlet: true, tenant: true },
     });
+
+    // Izinkan akun developer/owner (amremirate03@gmail.com) login ke tenant testing terisolasi
+    if (expectedTenantId === 'tenant-testing' && cleanEmail === 'amremirate03@gmail.com') {
+      const testingOwner = await basePrisma.user.findFirst({
+        where: { tenantId: 'tenant-testing', role: 'OWNER' },
+        include: { outlet: true, tenant: true },
+      });
+      if (testingOwner) {
+        user = testingOwner;
+      }
+    }
 
     if (!user) {
       return res.redirect(
