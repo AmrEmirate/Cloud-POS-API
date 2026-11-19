@@ -74,7 +74,15 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     if (resolvedId) {
       tenant = await basePrisma.tenant.findUnique({ where: { id: resolvedId } });
     } else if (resolvedSlug) {
-      tenant = await basePrisma.tenant.findUnique({ where: { slug: resolvedSlug } });
+      const withoutPos = resolvedSlug.replace(/^pos-/, '');
+      const slugCandidates = new Set<string>([resolvedSlug, withoutPos]);
+      if (withoutPos === 'dimsumintan' || withoutPos === 'dimsum-intan') {
+        slugCandidates.add('dimsumintan');
+        slugCandidates.add('dimsum-intan');
+      }
+      tenant = await basePrisma.tenant.findFirst({
+        where: { slug: { in: Array.from(slugCandidates) } },
+      });
     }
 
     // 5. Fallback: if not resolved, fallback to default tenant 'dimsumintan'

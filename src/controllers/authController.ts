@@ -9,6 +9,104 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
+const ALLOWED_TENANT_ROLES = ['OWNER', 'SUPERVISOR', 'KASIR', 'AKUNTAN', 'INVENTORY'] as const;
+
+const ROLE_DEFAULT_OUTLET_LABELS: Record<string, string> = {
+  SUPERADMIN: 'Platform Superadmin',
+  OWNER: 'Seluruh Outlet (Pusat)',
+  SUPERVISOR: 'Supervisor Area',
+  AKUNTAN: 'Akuntan & Keuangan',
+  INVENTORY: 'Inventory & Gudang',
+};
+
+const formatOutletNameByRole = (role: string, outletName?: string | null): string => {
+  if (outletName) return outletName;
+  return ROLE_DEFAULT_OUTLET_LABELS[role] || 'Supervisor Area';
+};
+
+const findTenantBySlugWithAliases = async (rawSlug: string) => {
+  const normalized = rawSlug.toLowerCase().trim();
+  if (!normalized) return null;
+  const withoutPos = normalized.replace(/^pos-/, '');
+  const candidates = new Set<string>([normalized, withoutPos]);
+  if (withoutPos === 'dimsumintan' || withoutPos === 'dimsum-intan') {
+    candidates.add('dimsumintan');
+    candidates.add('dimsum-intan');
+  }
+  return basePrisma.tenant.findFirst({
+    where: { slug: { in: Array.from(candidates) } },
+  });
+};
+
+const extractTenantFromOriginUrl = async (
+  originUrl?: string | null
+): Promise<{ tenant: any | null; explicitProvided: boolean }> => {
+  if (!originUrl) return { tenant: null, explicitProvided: false };
+  const trimmed = originUrl.trim();
+  if (/^dimsumintan:\/\/auth/i.test(trimmed)) {
+    const tenant = await findTenantBySlugWithAliases('dimsumintan');
+    return { tenant, explicitProvided: true };
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (!host || host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.')) {
+      return { tenant: null, explicitProvided: false };
+    }
+
+    if (host.includes('.posmu.cloud') || host.includes('.vimtk.cloud')) {
+      const parts = host.split('.');
+      if (parts.length >= 3 && parts[0] !== 'api' && parts[0] !== 'admin' && parts[0] !== 'www') {
+        const tenant = await findTenantBySlugWithAliases(parts[0]);
+        return { tenant, explicitProvided: true };
+      }
+      return { tenant: null, explicitProvided: false };
+    }
+
+    const byCustomDomain = await basePrisma.tenant.findFirst({
+      where: { customDomain: host },
+    });
+    return { tenant: byCustomDomain, explicitProvided: true };
+  } catch {
+    return { tenant: null, explicitProvided: false };
+  }
+};
+
+const resolveTargetTenantForAuth = async (
+  req: Request,
+  explicitOrigin?: string | null
+): Promise<{ tenant: any | null; explicitProvided: boolean }> => {
+  const rawSlug =
+    (req.query.tenant_slug as string) ||
+    (req.query.tenant as string) ||
+    (req.headers['x-tenant-slug'] as string) ||
+    (req.body?.tenantSlug as string) ||
+    '';
+  const cleanSlug = String(rawSlug).trim().toLowerCase();
+  if (cleanSlug) {
+    const tenant = await findTenantBySlugWithAliases(cleanSlug);
+    return { tenant, explicitProvided: true };
+  }
+
+  const rawId =
+    (req.headers['x-tenant-id'] as string) ||
+    (req.body?.tenantId as string) ||
+    '';
+  const cleanId = String(rawId).trim();
+  if (cleanId) {
+    const tenant = await basePrisma.tenant.findUnique({ where: { id: cleanId } });
+    return { tenant, explicitProvided: true };
+  }
+
+  const originHeader = explicitOrigin || (req.headers.origin as string) || '';
+  if (originHeader) {
+    return extractTenantFromOriginUrl(originHeader);
+  }
+
+  return { tenant: null, explicitProvided: false };
+};
+
 const getCallbackUrl = (req: Request): string => {
   if (process.env.GOOGLE_CALLBACK_URL) {
     return process.env.GOOGLE_CALLBACK_URL.trim();
@@ -32,10 +130,18 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const cleanUsername = String(username).trim().toLowerCase();
+    const { tenant: targetTenant, explicitProvided } = await resolveTargetTenantForAuth(req);
 
-    // Look up user globally
-    const user = await basePrisma.user.findUnique({
-      where: { username: cleanUsername },
+    if (explicitProvided && !targetTenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant tidak ditemukan atau tidak valid.',
+      });
+    }
+
+    // Look up user globally (case-insensitive to handle legacy mixed-case usernames)
+    const user = await basePrisma.user.findFirst({
+      where: { username: { equals: cleanUsername, mode: 'insensitive' } },
       include: { outlet: true, tenant: true },
     });
 
@@ -43,6 +149,14 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({
         success: false,
         message: 'Pengguna tidak ditemukan atau kredensial salah',
+      });
+    }
+
+    // Enforce strict tenant isolation when logging in via a specific tenant domain/slug
+    if (targetTenant && user.role !== 'SUPERADMIN' && user.tenantId !== targetTenant.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Akun Anda terdaftar pada tenant lain dan tidak dapat digunakan untuk login di tenant ini.',
       });
     }
 
@@ -86,13 +200,7 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
-        outletName: user.outlet
-          ? user.outlet.name
-          : user.role === 'SUPERADMIN'
-          ? 'Platform Superadmin'
-          : user.role === 'OWNER'
-          ? 'Seluruh Outlet (Pusat)'
-          : 'Supervisor Area',
+        outletName: formatOutletNameByRole(user.role, user.outlet?.name),
         tenant: user.tenant
           ? {
               id: user.tenant.id,
@@ -151,10 +259,18 @@ export const googleLogin = async (req: Request, res: Response) => {
     }
 
     const cleanEmail = String(tokenInfo.email).trim().toLowerCase();
+    const { tenant: targetTenant, explicitProvided } = await resolveTargetTenantForAuth(req);
+
+    if (explicitProvided && !targetTenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant tidak ditemukan atau tidak valid.',
+      });
+    }
 
     // Strict whitelist: hanya akun yang sudah didaftarkan oleh Admin/Owner yang boleh masuk
-    const user = await basePrisma.user.findUnique({
-      where: { username: cleanEmail },
+    const user = await basePrisma.user.findFirst({
+      where: { username: { equals: cleanEmail, mode: 'insensitive' } },
       include: { outlet: true, tenant: true },
     });
 
@@ -162,6 +278,14 @@ export const googleLogin = async (req: Request, res: Response) => {
       return res.status(403).json({
         success: false,
         message: `Akun Google (${cleanEmail}) belum terdaftar oleh Admin/Owner. Hubungi Admin untuk mendaftarkan email Google Anda terlebih dahulu.`,
+      });
+    }
+
+    // Enforce strict tenant isolation: 1 akun Google hanya boleh login di tenant tempat ia terdaftar
+    if (targetTenant && user.tenantId !== targetTenant.id) {
+      return res.status(403).json({
+        success: false,
+        message: `Akun Google (${cleanEmail}) terdaftar pada tenant lain dan tidak dapat digunakan untuk login di tenant ini.`,
       });
     }
 
@@ -196,11 +320,7 @@ export const googleLogin = async (req: Request, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
-        outletName: user.outlet
-          ? user.outlet.name
-          : user.role === 'OWNER'
-          ? 'Seluruh Outlet (Pusat)'
-          : 'Supervisor Area',
+        outletName: formatOutletNameByRole(user.role, user.outlet?.name),
         tenantId: user.tenantId,
         tenant: user.tenant || null,
       },
@@ -226,13 +346,28 @@ const buildOAuthRedirectUrl = (
   return `${base}?${key}=${encodeURIComponent(value)}`;
 };
 
-export const googleOAuthStart = (req: Request, res: Response) => {
+export const googleOAuthStart = async (req: Request, res: Response) => {
   const rawOrigin = String(req.query.redirect_origin || '').trim();
   const safeOrigin = isSafeRedirectOrigin(rawOrigin)
     ? rawOrigin
     : 'https://dimsumintan.vimtk.cloud';
 
-  const state = Buffer.from(JSON.stringify({ origin: safeOrigin })).toString('base64url');
+  const { tenant: targetTenant, explicitProvided } = await resolveTargetTenantForAuth(req, safeOrigin);
+  if (explicitProvided && !targetTenant) {
+    return res.redirect(
+      buildOAuthRedirectUrl(safeOrigin, 'google_error', 'Tenant tidak ditemukan atau tidak valid.')
+    );
+  }
+
+  const state = jwt.sign(
+    {
+      origin: safeOrigin,
+      tenantId: targetTenant?.id || null,
+      tenantSlug: targetTenant?.slug || null,
+    },
+    JWT_SECRET,
+    { expiresIn: '10m' }
+  );
   const redirectUri = getCallbackUrl(req);
 
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -248,12 +383,32 @@ export const googleOAuthStart = (req: Request, res: Response) => {
 
 export const googleOAuthCallback = async (req: Request, res: Response) => {
   let redirectOrigin = 'https://dimsumintan.vimtk.cloud';
+  let expectedTenantId: string | null = null;
   try {
-    if (req.query.state) {
-      const parsed = JSON.parse(Buffer.from(String(req.query.state), 'base64url').toString('utf8'));
-      if (parsed?.origin && isSafeRedirectOrigin(parsed.origin)) {
-        redirectOrigin = parsed.origin;
-      }
+    if (!req.query.state) {
+      return res.redirect(
+        buildOAuthRedirectUrl(redirectOrigin, 'google_error', 'Sesi login Google tidak valid.')
+      );
+    }
+
+    let parsedState: any = null;
+    try {
+      parsedState = jwt.verify(String(req.query.state), JWT_SECRET);
+    } catch {
+      return res.redirect(
+        buildOAuthRedirectUrl(
+          redirectOrigin,
+          'google_error',
+          'Sesi login Google kedaluwarsa atau tidak valid. Silakan coba lagi.'
+        )
+      );
+    }
+
+    if (parsedState?.origin && isSafeRedirectOrigin(parsedState.origin)) {
+      redirectOrigin = parsedState.origin;
+    }
+    if (parsedState?.tenantId) {
+      expectedTenantId = String(parsedState.tenantId);
     }
 
     const code = req.query.code ? String(req.query.code) : '';
@@ -301,8 +456,8 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
     }
 
     const cleanEmail = String(tokenInfo.email).trim().toLowerCase();
-    const user = await basePrisma.user.findUnique({
-      where: { username: cleanEmail },
+    const user = await basePrisma.user.findFirst({
+      where: { username: { equals: cleanEmail, mode: 'insensitive' } },
       include: { outlet: true, tenant: true },
     });
 
@@ -312,6 +467,16 @@ export const googleOAuthCallback = async (req: Request, res: Response) => {
           redirectOrigin,
           'google_error',
           `Akun Google (${cleanEmail}) belum terdaftar oleh Admin/Owner. Hubungi Admin untuk mendaftarkan email Google Anda.`
+        )
+      );
+    }
+
+    if (expectedTenantId && user.tenantId !== expectedTenantId) {
+      return res.redirect(
+        buildOAuthRedirectUrl(
+          redirectOrigin,
+          'google_error',
+          `Akun Google (${cleanEmail}) terdaftar pada tenant lain dan tidak dapat digunakan untuk login di tenant ini.`
         )
       );
     }
@@ -372,13 +537,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         username: user.username,
         role: user.role,
         outletId: user.outletId,
-        outletName: user.outlet
-          ? user.outlet.name
-          : user.role === 'SUPERADMIN'
-          ? 'Platform Superadmin'
-          : user.role === 'OWNER'
-          ? 'Seluruh Outlet (Pusat)'
-          : 'Supervisor Area',
+        outletName: formatOutletNameByRole(user.role, user.outlet?.name),
         tenant: user.tenant
           ? {
               id: user.tenant.id,
@@ -500,11 +659,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
       username: u.username,
       role: u.role,
       outletId: u.outletId,
-      outletName: u.outlet
-        ? u.outlet.name
-        : u.role === 'OWNER'
-        ? 'Seluruh Outlet (Pusat)'
-        : 'Supervisor Area',
+      outletName: formatOutletNameByRole(u.role, u.outlet?.name),
       tenantId: u.tenantId,
       tenantName: u.tenant ? u.tenant.name : 'Platform',
       createdAt: u.createdAt,
@@ -537,22 +692,35 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const existing = await basePrisma.user.findUnique({
-      where: { username: cleanUsername },
+    if (!ALLOWED_TENANT_ROLES.includes(String(role) as any)) {
+      return res.status(400).json({
+        success: false,
+        message: `Role tidak valid. Pilih salah satu: ${ALLOWED_TENANT_ROLES.join(', ')}`,
+      });
+    }
+
+    const existing = await basePrisma.user.findFirst({
+      where: { username: { equals: cleanUsername, mode: 'insensitive' } },
     });
 
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: `Username "${cleanUsername}" sudah digunakan!`,
+        message: `Username/Email "${cleanUsername}" sudah digunakan! Satu akun hanya boleh terdaftar di satu tenant.`,
+      });
+    }
+
+    const tenantIdToAssign = req.user?.tenantId;
+    if (!tenantIdToAssign) {
+      return res.status(403).json({
+        success: false,
+        message: 'Konteks tenant tidak valid untuk mendaftarkan pengguna.',
       });
     }
 
     const rawPassword = password ? String(password) : `google_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const passwordHash = await bcrypt.hash(rawPassword, 10);
     const pinHash = pin ? await bcrypt.hash(String(pin), 10) : null;
-
-    const tenantIdToAssign = req.user?.tenantId;
 
     const newUser = await prisma.user.create({
       data: {
@@ -576,11 +744,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         username: newUser.username,
         role: newUser.role,
         outletId: newUser.outletId,
-        outletName: newUser.outlet
-          ? newUser.outlet.name
-          : newUser.role === 'OWNER'
-          ? 'Seluruh Outlet (Pusat)'
-          : 'Supervisor Area',
+        outletName: formatOutletNameByRole(newUser.role, newUser.outlet?.name),
       },
     });
   } catch (error: any) {
@@ -615,6 +779,20 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (!ALLOWED_TENANT_ROLES.includes(String(role) as any)) {
+      return res.status(400).json({
+        success: false,
+        message: `Role tidak valid. Pilih salah satu: ${ALLOWED_TENANT_ROLES.join(', ')}`,
+      });
+    }
+
+    if (role !== undefined && !ALLOWED_TENANT_ROLES.includes(String(role) as any)) {
+      return res.status(400).json({
+        success: false,
+        message: `Role tidak valid. Pilih salah satu: ${ALLOWED_TENANT_ROLES.join(', ')}`,
+      });
+    }
+
     const cleanName = String(name || existingUser.name).trim();
     const cleanUsername = String(username || existingUser.username).trim().toLowerCase();
 
@@ -625,14 +803,14 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (cleanUsername !== existingUser.username) {
-      const duplicate = await basePrisma.user.findUnique({
-        where: { username: cleanUsername },
+    if (cleanUsername !== existingUser.username.toLowerCase()) {
+      const duplicate = await basePrisma.user.findFirst({
+        where: { username: { equals: cleanUsername, mode: 'insensitive' } },
       });
       if (duplicate && duplicate.id !== id) {
         return res.status(400).json({
           success: false,
-          message: `Username "${cleanUsername}" sudah digunakan!`,
+          message: `Username/Email "${cleanUsername}" sudah digunakan! Satu akun hanya boleh terdaftar di satu tenant.`,
         });
       }
     }
@@ -642,7 +820,12 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       name: cleanName,
       username: cleanUsername,
       role: nextRole,
-      outletId: nextRole === 'OWNER' ? null : (outletId !== undefined ? (outletId || null) : existingUser.outletId),
+      outletId:
+        nextRole !== 'KASIR'
+          ? null
+          : outletId !== undefined
+          ? outletId || null
+          : existingUser.outletId,
     };
 
     if (password && String(password).trim().length > 0) {
@@ -674,11 +857,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
         username: updated.username,
         role: updated.role,
         outletId: updated.outletId,
-        outletName: updated.outlet
-          ? updated.outlet.name
-          : updated.role === 'OWNER'
-          ? 'Seluruh Outlet (Pusat)'
-          : 'Supervisor Area',
+        outletName: formatOutletNameByRole(updated.role, updated.outlet?.name),
       },
     });
   } catch (error: any) {

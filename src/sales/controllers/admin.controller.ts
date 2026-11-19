@@ -429,13 +429,23 @@ export class AdminController {
       const planConfig = getPlanDetails(plan);
       const feePerOutlet = pricePerOutlet ? Number(pricePerOutlet) : planConfig.price;
       const cleanPhone = ownerPhone.replace(/[^0-9]/g, '');
-      const username = ownerUsername || `owner_${cleanSlug.slice(0, 8)}_${cleanPhone.slice(-4)}`;
+      const username = (ownerUsername || `owner_${cleanSlug.slice(0, 8)}_${cleanPhone.slice(-4)}`)
+        .trim()
+        .toLowerCase();
       const licenseKey = `LIC-${cleanSlug.toUpperCase()}-PRO-2026`;
 
       // Cek apakah slug sudah ada di basePrisma
       const existing = await basePrisma.tenant.findUnique({ where: { slug: cleanSlug } });
       if (existing) {
         return sendError(res, `Subdomain / Slug "${cleanSlug}" sudah digunakan!`, 400);
+      }
+
+      // Cek apakah username/email owner sudah terdaftar di tenant lain
+      const existingUser = await basePrisma.user.findFirst({
+        where: { username: { equals: username, mode: 'insensitive' } },
+      });
+      if (existingUser) {
+        return sendError(res, `Username/Email "${username}" sudah digunakan di tenant lain!`, 400);
       }
 
       const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);

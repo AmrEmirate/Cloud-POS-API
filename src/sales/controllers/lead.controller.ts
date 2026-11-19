@@ -432,10 +432,13 @@ export class LeadController {
         return sendError(res, `Subdomain / Slug "${cleanSlug}" sudah dipakai tenant lain. Silakan pilih slug lain.`, 400);
       }
 
-      // Cek apakah username sudah ada di database tenant
-      const existingUser = await basePrisma.user.findFirst({ where: { username: username.trim() } });
+      // Cek apakah username sudah ada di database tenant (case-insensitive)
+      const cleanOwnerUsername = username.trim().toLowerCase();
+      const existingUser = await basePrisma.user.findFirst({
+        where: { username: { equals: cleanOwnerUsername, mode: 'insensitive' } },
+      });
       if (existingUser) {
-        return sendError(res, `Username "${username}" sudah digunakan di Cloud POS. Silakan gunakan username lain.`, 400);
+        return sendError(res, `Username "${cleanOwnerUsername}" sudah digunakan di Cloud POS. Silakan gunakan username lain.`, 400);
       }
 
       const planConfig = getPlanDetails(planCode);
@@ -484,7 +487,7 @@ export class LeadController {
             tenantId: tenant.id,
             outletId: outlet.id,
             name: (ownerName || 'Pemilik Toko').trim(),
-            username: username.trim(),
+            username: cleanOwnerUsername,
             passwordHash,
             pinHash,
             role: BaseRole.OWNER,
