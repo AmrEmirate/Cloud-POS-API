@@ -39,7 +39,7 @@ export const tenantResolutionMiddleware = async (req: TenantRequest, res: Respon
     if (!resolvedSlug && !resolvedId && rawHost) {
       const host = rawHost.toLowerCase();
       // Check if it is a platform subdomain
-      if (host.includes('.posmu.cloud') || host.includes('.vimtk.cloud')) {
+      if (host.includes('.posmu.cloud') || host.includes('.vaxel.my.id')) {
         const parts = host.split('.');
         if (parts.length >= 3 && parts[0] !== 'api' && parts[0] !== 'admin' && parts[0] !== 'www') {
           resolvedSlug = parts[0];

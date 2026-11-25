@@ -134,7 +134,7 @@ describe('White Box Testing: Commission & Tax Mathematics', () => {
       const payoutPayload = {
         withdrawalId: 'wd-001',
         status: 'COMPLETED',
-        proofUrl: 'https://storage.vimtk.cloud/proofs/mbca-ref-88291.jpg',
+        proofUrl: 'https://storage.vaxel.my.id/proofs/mbca-ref-88291.jpg',
         adminNotes: 'Transfer manual m-BCA Ref: 8829104 atas nama Budi Santoso',
       };
 

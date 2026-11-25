@@ -26,13 +26,13 @@ export const dynamicCors = cors({
       const parsed = new URL(origin);
       const hostname = parsed.hostname.toLowerCase();
 
-      // 2. Izinkan subdomain utama platform (.posmu.cloud, .vimtk.cloud, localhost, LAN) secara ketat berdasarkan hostname
+      // 2. Izinkan subdomain utama platform (.posmu.cloud, .vaxel.my.id, localhost, LAN) secara ketat berdasarkan hostname
       if (
         isLocalOrLanHostname(hostname) ||
         hostname === 'posmu.cloud' ||
         hostname.endsWith('.posmu.cloud') ||
-        hostname === 'vimtk.cloud' ||
-        hostname.endsWith('.vimtk.cloud')
+        hostname === 'vaxel.my.id' ||
+        hostname.endsWith('.vaxel.my.id')
       ) {
         return callback(null, true);
       }

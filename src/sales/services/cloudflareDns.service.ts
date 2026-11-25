@@ -5,7 +5,7 @@ export class CloudflareDnsService {
 
   /**
    * Otomatis membuatkan DNS A Record di Cloudflare dengan status Proxied (SSL HTTPS Aktif)
-   * Format subdomain: https://pos-[tenantSlug].vimtk.cloud
+   * Format subdomain: https://pos-[tenantSlug].vaxel.my.id
    */
   public static async createTenantSubdomain(tenantSlug: string): Promise<{
     subdomain: string;
@@ -18,7 +18,7 @@ export class CloudflareDnsService {
       .replace(/[^a-z0-9-]+/g, '-')
       .replace(/^-|-$/g, '');
 
-    const recordName = `pos-${cleanSlug}.vimtk.cloud`;
+    const recordName = `pos-${cleanSlug}.vaxel.my.id`;
     const liveUrl = `https://${recordName}`;
 
     try {

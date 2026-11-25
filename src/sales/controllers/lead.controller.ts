@@ -452,7 +452,7 @@ export class LeadController {
           data: {
             name: storeName.trim(),
             slug: cleanSlug,
-            customDomain: customDomain ? customDomain.trim().toLowerCase() : `${cleanSlug}.vimtk.cloud`,
+            customDomain: customDomain ? customDomain.trim().toLowerCase() : `${cleanSlug}.vaxel.my.id`,
             plan: planConfig.code,
             pricePerOutlet: planConfig.price,
             maxOutlets: Number(outletCount) || 1,
@@ -575,7 +575,7 @@ export class LeadController {
                 ownerName: (ownerName || 'Pemilik Usaha').trim(),
                 phone: cleanPhone,
                 address: address ? address.trim() : 'Alamat Operasional',
-                notes: `[Channel: OFFLINE] Terverifikasi Resmi & Aktif Cloud POS (${cleanSlug}.vimtk.cloud)`,
+                notes: `[Channel: OFFLINE] Terverifikasi Resmi & Aktif Cloud POS (${cleanSlug}.vaxel.my.id)`,
                 status: LeadStatus.DEAL,
                 protectedUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
               },
@@ -600,7 +600,7 @@ export class LeadController {
           name: tenantResult.tenant.name,
           slug: tenantResult.tenant.slug,
           domain: tenantResult.tenant.customDomain,
-          webUrl: `https://${tenantResult.tenant.slug}.vimtk.cloud`,
+          webUrl: `https://${tenantResult.tenant.slug}.vaxel.my.id`,
           licenseKey,
           plan: planConfig.name,
           monthlyFee: planConfig.price,
@@ -608,7 +608,7 @@ export class LeadController {
         credentials: {
           username: username.trim(),
           password,
-          loginUrl: `https://${tenantResult.tenant.slug}.vimtk.cloud`,
+          loginUrl: `https://${tenantResult.tenant.slug}.vaxel.my.id`,
         },
         protekOutletId: protekOutlet.id,
       }, 201);

@@ -55,7 +55,7 @@ const extractTenantFromOriginUrl = async (
       return { tenant: null, explicitProvided: false };
     }
 
-    if (host.includes('.posmu.cloud') || host.includes('.vimtk.cloud')) {
+    if (host.includes('.posmu.cloud') || host.includes('.vaxel.my.id')) {
       const parts = host.split('.');
       if (parts.length >= 3 && parts[0] !== 'api' && parts[0] !== 'admin' && parts[0] !== 'www') {
         const tenant = await findTenantBySlugWithAliases(parts[0]);
@@ -115,7 +115,7 @@ const getCallbackUrl = (req: Request): string => {
   if (host.includes('localhost') || host.includes('127.0.0.1')) {
     return `http://${host}/api/v1/auth/google/callback`;
   }
-  return 'https://vimtk.cloud/api/v1/auth/google/callback';
+  return 'https://vaxel.my.id/api/v1/auth/google/callback';
 };
 
 export const login = async (req: Request, res: Response) => {
@@ -357,8 +357,8 @@ const isSafeRedirectOrigin = async (origin: string): Promise<boolean> => {
     if (host === 'localhost' || host === '127.0.0.1') return true;
     if (
       parsed.protocol === 'https:' &&
-      (host === 'vimtk.cloud' ||
-        host.endsWith('.vimtk.cloud') ||
+      (host === 'vaxel.my.id' ||
+        host.endsWith('.vaxel.my.id') ||
         host === 'posmu.cloud' ||
         host.endsWith('.posmu.cloud'))
     ) {
@@ -391,7 +391,7 @@ export const googleOAuthStart = async (req: Request, res: Response) => {
   const rawOrigin = String(req.query.redirect_origin || '').trim();
   const safeOrigin = (await isSafeRedirectOrigin(rawOrigin))
     ? rawOrigin
-    : 'https://dimsumintan.vimtk.cloud';
+    : 'https://dimsumintan.vaxel.my.id';
 
   const { tenant: targetTenant, explicitProvided } = await resolveTargetTenantForAuth(req, safeOrigin);
   if (explicitProvided && !targetTenant) {
@@ -423,7 +423,7 @@ export const googleOAuthStart = async (req: Request, res: Response) => {
 };
 
 export const googleOAuthCallback = async (req: Request, res: Response) => {
-  let redirectOrigin = 'https://dimsumintan.vimtk.cloud';
+  let redirectOrigin = 'https://dimsumintan.vaxel.my.id';
   let expectedTenantId: string | null = null;
   try {
     if (!req.query.state) {

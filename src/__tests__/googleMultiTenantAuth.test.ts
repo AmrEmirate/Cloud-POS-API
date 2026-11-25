@@ -154,11 +154,11 @@ describe('Multi-Tenant Google Social Login Isolation', () => {
 
     const startReq = {
       query: {
-        redirect_origin: 'https://tenant2.vimtk.cloud',
+        redirect_origin: 'https://tenant2.vaxel.my.id',
         tenant_slug: 'tenant2',
       },
       headers: {},
-      get: () => 'api.vimtk.cloud',
+      get: () => 'api.vaxel.my.id',
     } as unknown as Request;
     const startRes = makeRes();
 
@@ -169,7 +169,7 @@ describe('Multi-Tenant Google Social Login Isolation', () => {
     const state = authUrl.searchParams.get('state')!;
     const decodedState = jwt.decode(state) as any;
     expect(decodedState.tenantId).toBe('tenant-2');
-    expect(decodedState.origin).toBe('https://tenant2.vimtk.cloud');
+    expect(decodedState.origin).toBe('https://tenant2.vaxel.my.id');
 
     // Now simulate Google callback returning Tenant 1's user email
     global.fetch = jest
@@ -201,13 +201,13 @@ describe('Multi-Tenant Google Social Login Isolation', () => {
     const cbReq = {
       query: { code: 'oauth-code', state },
       headers: {},
-      get: () => 'api.vimtk.cloud',
+      get: () => 'api.vaxel.my.id',
     } as unknown as Request;
     const cbRes = makeRes();
 
     await googleOAuthCallback(cbReq, cbRes);
 
-    expect(cbRes.redirectUrl).toContain('https://tenant2.vimtk.cloud/?google_error=');
+    expect(cbRes.redirectUrl).toContain('https://tenant2.vaxel.my.id/?google_error=');
     expect(cbRes.redirectUrl).not.toContain('google_token=');
   });
 

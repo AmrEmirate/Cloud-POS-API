@@ -504,7 +504,7 @@ export class ProtekIntegrationService {
         ownerName: ownerUser?.name || t.bankAccountName || 'Owner Toko',
         ownerUsername: ownerUser?.username || 'owner',
         ownerPhone: mainOutlet?.phone || '081284525304',
-        ownerEmail: `${t.slug}@vimtk.cloud`,
+        ownerEmail: `${t.slug}@vaxel.my.id`,
         cluster: clusterLocation,
         bank: {
           bankName: t.bankName,

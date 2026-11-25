@@ -50,7 +50,7 @@ export class TenantFeGeneratorService {
     input: GenerateTenantFeInput
   ): Promise<GenerateTenantFeResult> {
     const { tenantSlug, storeName, licenseKey, themeColor, themeConfig } = input;
-    const apiUrl = input.apiUrl || config.cloudPosApiUrl || 'https://api-pos.vimtk.cloud/api/v1';
+    const apiUrl = input.apiUrl || config.cloudPosApiUrl || 'https://api-pos.vaxel.my.id/api/v1';
 
     const tenantDir = path.join(this.BASE_TENANTS_DIR, tenantSlug);
     if (!fs.existsSync(tenantDir)) {
